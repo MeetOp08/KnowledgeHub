@@ -1,5 +1,8 @@
 import React, { useState } from "react";
 
+// Use Vite proxy in dev; override with VITE_API_URL in prod if needed
+const API_BASE_URL = import.meta.env.VITE_API_URL || "";
+
 interface SignUpProps {
   onSignUp: (role: "student" | "teacher", userInfo: any) => void;
   onSwitchToLogin: () => void;
@@ -11,17 +14,35 @@ const SignUp: React.FC<SignUpProps> = ({ onSignUp, onSwitchToLogin }) => {
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<"student" | "teacher">("student");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
+    setError("");
     setLoading(true);
+
     try {
-      const response = await fetch("/api/auth/register", {
+      const normalizedEmail = email.toLowerCase().trim();
+
+      // Basic validation
+      if (!fullName.trim()) {
+        setError("Full name is required");
+        return;
+      }
+      if (!normalizedEmail) {
+        setError("Email is required");
+        return;
+      }
+      if (password.length < 6) {
+        setError("Password must be at least 6 characters");
+        return;
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ fullName, email, password, role }),
+        body: JSON.stringify({ name: fullName, email: normalizedEmail, password, role }),
       });
 
       const data = await response.json();
@@ -30,11 +51,11 @@ const SignUp: React.FC<SignUpProps> = ({ onSignUp, onSwitchToLogin }) => {
         alert("Sign up successful!");
         onSignUp(role, data.user);
       } else {
-        alert(data.message || "Sign up failed");
+        setError(data.message || "Sign up failed");
       }
     } catch (error) {
       console.error("❌ Sign up error:", error);
-      alert("Unable to reach server. Please try again later.");
+      setError("Unable to reach server. Please try again later.");
     } finally {
       setLoading(false);
     }
@@ -49,6 +70,12 @@ const SignUp: React.FC<SignUpProps> = ({ onSignUp, onSwitchToLogin }) => {
         <p className="text-sm text-gray-600 text-center mb-6">
           Create your account to start learning.
         </p>
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4">
+            {error}
+          </div>
+        )}
 
         <form className="space-y-4" onSubmit={handleSubmit}>
           <input

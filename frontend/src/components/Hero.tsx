@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowRight, BookOpen, MessageCircle, Video } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 
 interface HeroProps {
   onGetStarted: () => void;
@@ -38,42 +38,10 @@ const Hero: React.FC<HeroProps> = ({ onGetStarted }) => {
               <ArrowRight className="h-5 w-5" />
             </button>
             
-            <button className="border-2 border-gray-300 text-gray-700 px-8 py-4 rounded-xl font-semibold text-lg hover:border-blue-600 hover:text-blue-600 transition-all transform hover:scale-105">
-              Watch Demo
-            </button>
           </div>
 
-          {/* Feature Pills */}
-           <div className="flex flex-wrap justify-center gap-4 mb-16">
-            <div className="flex items-center space-x-2 bg-white/80 backdrop-blur-sm px-4 py-2 rounded-full shadow-sm">
-              <Video className="h-4 w-4 text-green-600" />
-              <span className="text-sm font-medium text-gray-700">Live Tutoring</span>
-            </div>
-            <div className="flex items-center space-x-2 bg-white/80 backdrop-blur-sm px-4 py-2 rounded-full shadow-sm">
-              <MessageCircle className="h-4 w-4 text-blue-600" />
-              <span className="text-sm font-medium text-gray-700">AI Assistant</span>
-            </div>
-            <div className="flex items-center space-x-2 bg-white/80 backdrop-blur-sm px-4 py-2 rounded-full shadow-sm">
-              <BookOpen className="h-4 w-4 text-purple-600" />
-              <span className="text-sm font-medium text-gray-700">Study Materials</span>
-            </div>
-          </div> 
-
-          {/* Stats */}
-           <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-4xl mx-auto">
-            <div className="text-center">
-              <div className="text-3xl font-bold text-gray-900 mb-2">10K+</div>
-              <div className="text-gray-600">Students Helped</div>
-            </div>
-            <div className="text-center">
-              <div className="text-3xl font-bold text-gray-900 mb-2">500+</div>
-              <div className="text-gray-600">Expert Tutors</div>
-            </div>
-            <div className="text-center">
-              <div className="text-3xl font-bold text-gray-900 mb-2">98%</div>
-              <div className="text-gray-600">Success Rate</div>
-            </div>
-          </div> 
+        
+         
         </div>
       </div>
     </section>

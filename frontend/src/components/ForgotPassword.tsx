@@ -6,6 +6,7 @@ interface ForgotPasswordProps {
 
 const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onBackToLogin }) => {
   const [email, setEmail] = useState("");
+  const [role, setRole] = useState("student");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -15,10 +16,10 @@ const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onBackToLogin }) => {
     setMessage("");
 
     try {
-      const res = await fetch("/api/auth/forgot-password", {
+      const res = await fetch("http://localhost:1234/api/auth/forgot-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email, role }),
       });
 
       const data = await res.json();
@@ -42,6 +43,15 @@ const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onBackToLogin }) => {
         </h2>
 
         <form onSubmit={handleForgotPassword} className="space-y-4">
+          <select
+            value={role}
+            onChange={(e) => setRole(e.target.value)}
+            className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="student">Student</option>
+            <option value="teacher">Teacher</option>
+          </select>
+
           <input
             type="email"
             placeholder="Enter your email"

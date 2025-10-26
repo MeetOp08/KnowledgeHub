@@ -14,13 +14,25 @@ const Login: React.FC<LoginProps> = ({ onLogin, onSwitchToSignUp, onSwitchToForg
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<"student" | "teacher">("student");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError("");
     setLoading(true);
 
     try {
       const normalizedEmail = email.toLowerCase().trim();
+
+      // Basic validation
+      if (!normalizedEmail) {
+        setError("Email is required");
+        return;
+      }
+      if (!password) {
+        setError("Password is required");
+        return;
+      }
 
       const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
         method: "POST",
@@ -34,11 +46,11 @@ const Login: React.FC<LoginProps> = ({ onLogin, onSwitchToSignUp, onSwitchToForg
       if (response.ok) {
         onLogin(role, data.user);
       } else {
-        alert(data.message || "Login failed");
+        setError(data.message || "Login failed");
       }
     } catch (error) {
       console.error("❌ Login error:", error);
-      alert("Unable to reach server. Please try again later.");
+      setError("Unable to reach server. Please try again later.");
     } finally {
       setLoading(false);
     }
@@ -51,6 +63,12 @@ const Login: React.FC<LoginProps> = ({ onLogin, onSwitchToSignUp, onSwitchToForg
         <p className="text-sm text-gray-600 text-center mb-6">
           Sign in to continue learning with KnowledgeHub.
         </p>
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4">
+            {error}
+          </div>
+        )}
 
         <form className="space-y-4" onSubmit={handleSubmit}>
           <input

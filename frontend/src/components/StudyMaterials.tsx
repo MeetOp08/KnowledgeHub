@@ -44,6 +44,7 @@ interface Booking {
 }
 
 const StudyMaterials: React.FC = () => {
+  const BACKEND_BASE = import.meta.env.VITE_API_URL || "";
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedSubject, setSelectedSubject] = useState('all');
   const [selectedType, setSelectedType] = useState('all');
@@ -227,7 +228,7 @@ const StudyMaterials: React.FC = () => {
         // Construct full URL for uploaded files
         const fullUrl = material.fileUrl.startsWith('http') 
           ? material.fileUrl 
-          : `${material.fileUrl}`;
+          : `${BACKEND_BASE}${material.fileUrl}`;
         window.open(fullUrl, '_blank');
       } else {
         alert(`Viewing for ${material.type} is not implemented yet.`);
@@ -255,7 +256,7 @@ const StudyMaterials: React.FC = () => {
         // Construct full URL for uploaded files
         const fullUrl = material.fileUrl.startsWith('http') 
           ? material.fileUrl 
-          : `${material.fileUrl}`;
+          : `${BACKEND_BASE}${material.fileUrl}`;
         const link = document.createElement('a');
         link.href = fullUrl;
         link.download = material.title;

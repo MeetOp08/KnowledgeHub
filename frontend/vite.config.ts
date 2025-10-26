@@ -8,10 +8,15 @@ export default defineConfig({
     exclude: ['lucide-react'],
   },
   server: {
-    port: 5173,
+    port: 5173, // ✅ Frontend port
     proxy: {
       '/api': {
-        target: 'http://localhost:1234',
+        target: 'http://localhost:5000', // ✅ Backend on 5000
+        changeOrigin: true,
+        secure: false,
+      },
+      '/uploads': {
+        target: 'http://localhost:5000', // ✅ Backend on 5000
         changeOrigin: true,
         secure: false,
       },

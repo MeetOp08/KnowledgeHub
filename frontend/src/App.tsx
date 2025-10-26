@@ -18,6 +18,7 @@ function App() {
   const [userRole, setUserRole] = useState<"student" | "teacher" | null>(null);
   const [username, setUsername] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [justLoggedIn, setJustLoggedIn] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -32,8 +33,8 @@ function App() {
           setUserRole(data.user.role);
           setUsername(data.user.email);
 
-          // ✅ Redirect based on role
-          if (location.pathname === "/" || location.pathname === "/login" || location.pathname === "/signup") {
+          // ✅ Redirect based on role (only if not just logged in)
+          if (!justLoggedIn && (location.pathname === "/" || location.pathname === "/login" || location.pathname === "/signup")) {
             if (data.user.role === "teacher") {
               navigate("/teacher-dashboard", { replace: true });
             } else if (data.user.role === "student") {
@@ -51,10 +52,21 @@ function App() {
         setLoading(false);
       }
     };
-    checkAuthStatus();
-  }, [location.pathname, navigate]);
+    
+    // Add small delay after login to allow session to be set
+    if (justLoggedIn) {
+      const timer = setTimeout(() => {
+        setJustLoggedIn(false);
+        checkAuthStatus();
+      }, 100);
+      return () => clearTimeout(timer);
+    } else {
+      checkAuthStatus();
+    }
+  }, [location.pathname, navigate, justLoggedIn]);
 
   const handleLogin = (role: "student" | "teacher", userInfo: any) => {
+    setJustLoggedIn(true);
     setUserRole(role);
     setUsername(userInfo.email);
     if (role === "teacher") navigate("/teacher-dashboard");
@@ -62,6 +74,7 @@ function App() {
   };
 
   const handleSignUp = (role: "student" | "teacher", userInfo: any) => {
+    setJustLoggedIn(true);
     setUserRole(role);
     setUsername(userInfo.email);
     if (role === "teacher") navigate("/teacher-dashboard");

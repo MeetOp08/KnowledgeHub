@@ -60,7 +60,7 @@ router.get("/", async (req, res) => {
       .populate("uploadedBy", "fullName")
       .sort({ createdAt: -1 });
 
-    res.json(materials);
+    res.json({ materials });
   } catch (err) {
     res.status(500).json({ message: "Error fetching study materials", error: err.message });
   }
@@ -77,20 +77,46 @@ router.get("/:id", async (req, res) => {
       return res.status(404).json({ message: "Study material not found" });
     }
 
-    // Increment download count
-    material.downloadCount += 1;
-    await material.save();
+    // Return without incrementing counters here
 
-    res.json(material);
+    res.json({ material });
   } catch (err) {
     res.status(500).json({ message: "Error fetching study material", error: err.message });
+  }
+});
+
+// Track a view
+router.post("/:id/view", async (req, res) => {
+  try {
+    const material = await StudyMaterial.findById(req.params.id);
+    if (!material) return res.status(404).json({ message: "Study material not found" });
+    material.views += 1;
+    await material.save();
+    res.json({ views: material.views });
+  } catch (err) {
+    res.status(500).json({ message: "Error tracking view", error: err.message });
+  }
+});
+
+// Track a download
+router.post("/:id/download", async (req, res) => {
+  try {
+    const material = await StudyMaterial.findById(req.params.id);
+    if (!material) return res.status(404).json({ message: "Study material not found" });
+    material.downloads += 1;
+    await material.save();
+    res.json({ downloads: material.downloads });
+  } catch (err) {
+    res.status(500).json({ message: "Error tracking download", error: err.message });
   }
 });
 
 // 📝 Upload new study material
 router.post("/", upload.single("file"), async (req, res) => {
   try {
-    if (!req.session.user?.id) {
+    // Check authentication - support both new and legacy session structure
+    const teacherId = (req.session.user?.role === "teacher" && req.session.user.id) || req.session.teacherId;
+    if (!teacherId) {
       return res.status(401).json({ message: "Not authenticated" });
     }
 
@@ -110,11 +136,15 @@ router.post("/", upload.single("file"), async (req, res) => {
       fileUrl: `/uploads/${req.file.filename}`,
       fileName: req.file.originalname,
       fileSize: req.file.size,
-      uploadedBy: req.session.user?.id,
+      uploadedBy: teacherId,
       tags: tags ? tags.split(",").map(tag => tag.trim()) : []
     });
 
     await studyMaterial.save();
+    
+    // Populate the uploadedBy field for response
+    await studyMaterial.populate('uploadedBy', 'fullName email');
+    
     res.status(201).json(studyMaterial);
   } catch (err) {
     res.status(500).json({ message: "Error uploading study material", error: err.message });
@@ -157,7 +187,9 @@ router.put("/:id", async (req, res) => {
 // 📝 Delete study material
 router.delete("/:id", async (req, res) => {
   try {
-    if (!req.session.user?.id) {
+    // Check authentication - support both new and legacy session structure
+    const teacherId = (req.session.user?.role === "teacher" && req.session.user.id) || req.session.teacherId;
+    if (!teacherId) {
       return res.status(401).json({ message: "Not authenticated" });
     }
 
@@ -167,7 +199,7 @@ router.delete("/:id", async (req, res) => {
     }
 
     // Check if user is the uploader
-    if (material.uploadedBy.toString() !== req.session.user?.id) {
+    if (material.uploadedBy.toString() !== teacherId) {
       return res.status(403).json({ message: "Not authorized" });
     }
 

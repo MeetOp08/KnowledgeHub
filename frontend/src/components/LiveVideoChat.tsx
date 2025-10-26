@@ -4,12 +4,13 @@ interface LiveVideoChatProps {
   onEndCall: () => void;
   teacherName?: string;
   studentName?: string;
+  meetingLink?: string;
 }
 
 const LiveVideoChat: React.FC<LiveVideoChatProps> = ({ 
   onEndCall, 
   teacherName = "Teacher", 
-  studentName = "Student" 
+  meetingLink
 }) => {
   const [isVideoOn, setIsVideoOn] = useState(true);
   const [isAudioOn, setIsAudioOn] = useState(true);
@@ -22,8 +23,8 @@ const LiveVideoChat: React.FC<LiveVideoChatProps> = ({
   }>>([]);
   const [newMessage, setNewMessage] = useState("");
   const [callDuration, setCallDuration] = useState(0);
+  const [isConnected, setIsConnected] = useState(false);
 
-  const videoRef = useRef<HTMLVideoElement>(null);
   const chatRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -32,8 +33,29 @@ const LiveVideoChat: React.FC<LiveVideoChatProps> = ({
       setCallDuration(prev => prev + 1);
     }, 1000);
 
+    // Add welcome messages
+    setChatMessages([
+      {
+        id: "1",
+        sender: "System",
+        message: `Welcome to the live session with ${teacherName}!`,
+        timestamp: new Date()
+      },
+      {
+        id: "2", 
+        sender: "System",
+        message: "You can use the chat to ask questions during the session.",
+        timestamp: new Date()
+      }
+    ]);
+
+    // Simulate connection after 2 seconds
+    setTimeout(() => {
+      setIsConnected(true);
+    }, 2000);
+
     return () => clearInterval(timer);
-  }, []);
+  }, [teacherName]);
 
   useEffect(() => {
     // Scroll chat to bottom when new messages arrive
@@ -95,7 +117,21 @@ const LiveVideoChat: React.FC<LiveVideoChatProps> = ({
                 <span className="text-4xl text-white">📹</span>
               </div>
               <p className="text-white text-lg">{teacherName}</p>
-              <p className="text-gray-300 text-sm">Video Call in Progress</p>
+              <p className="text-gray-300 text-sm">
+                {isConnected ? "Video Call in Progress" : "Connecting..."}
+              </p>
+              {meetingLink && (
+                <div className="mt-4">
+                  <a
+                    href={meetingLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm transition"
+                  >
+                    Join External Meeting
+                  </a>
+                </div>
+              )}
             </div>
           </div>
 

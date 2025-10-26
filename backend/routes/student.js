@@ -19,10 +19,10 @@ router.get("/dashboard/data", async (req, res) => {
       return res.status(403).json({ message: "Not authorized" });
     }
 
-    // Get student's bookings
-    const bookings = await Booking.find({ studentId: user._id })
-      .populate("teacherId", "fullName email subjects")
-      .sort({ startTime: -1 });
+    // Get student's bookings (schema uses studentName and teacher ref)
+    const bookings = await Booking.find({ studentName: user.fullName })
+      .populate("teacher", "fullName email subjects")
+      .sort({ createdAt: -1 });
 
     // Get study materials available to student (all materials for now)
     const studyMaterials = await StudyMaterial.find()
@@ -57,6 +57,45 @@ router.get("/dashboard/data", async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ message: "Error fetching dashboard data", error: err.message });
+  }
+});
+
+// 📝 Update student profile
+router.put("/profile", async (req, res) => {
+  try {
+    const userId = req.session.user?.id;
+    if (!userId) {
+      return res.status(401).json({ message: "Not authenticated" });
+    }
+
+    const { fullName, email, grade, school, subjects, learningGoals } = req.body;
+
+    const student = await Student.findById(userId);
+    if (!student) {
+      return res.status(404).json({ message: "Student not found" });
+    }
+
+    // Update student fields
+    student.fullName = fullName || student.fullName;
+    student.email = email || student.email;
+    student.grade = grade || student.grade;
+    student.school = school || student.school;
+    student.subjects = subjects || student.subjects;
+    student.learningGoals = learningGoals || student.learningGoals;
+
+    await student.save();
+
+    res.json({
+      id: student._id,
+      fullName: student.fullName,
+      email: student.email,
+      grade: student.grade,
+      school: student.school,
+      subjects: student.subjects,
+      learningGoals: student.learningGoals
+    });
+  } catch (err) {
+    res.status(500).json({ message: "Error updating profile", error: err.message });
   }
 });
 
