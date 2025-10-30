@@ -12,8 +12,14 @@ import {
   FaDownload,
   FaEye,
   FaCheckCircle,
+  FaHistory,
+  FaPlus,
+  FaTrash,
+  FaSave,
+  FaEdit,
 } from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
+import StudyMaterials from "./StudyMaterials";
 import LiveTutoring from "./LiveTutoring";
 import LiveVideoChat from "./LiveVideoChat";
 
@@ -46,6 +52,12 @@ interface StudentDashboardProps {
   onLogout?: () => Promise<void>;
 }
 
+declare global {
+  interface Window {
+    toast?: { success: (msg: string) => void; error: (msg: string) => void };
+  }
+}
+
 const StudentDashboard: React.FC<StudentDashboardProps> = ({ onLogout }) => {
   const navigate = useNavigate();
 
@@ -75,8 +87,10 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ onLogout }) => {
   const [error, setError] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [activePage, setActivePage] = useState("dashboard");
+  const [editMode, setEditMode] = useState(false);
+  const [updatedProfile, setUpdatedProfile] = useState<StudentProfile>(dashboard.student);
 
-  // ---------- Navigation Items ----------
+  // ---------- Navigation ----------
   const navItems = [
     { name: "Dashboard", path: "dashboard", icon: <FaHome /> },
     { name: "Profile", path: "profile", icon: <FaUser /> },
@@ -107,7 +121,10 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ onLogout }) => {
         }
 
         const data = await res.json();
-        if (data) setDashboard(data);
+        if (data) {
+          setDashboard(data);
+          setUpdatedProfile(data.student);
+        }
       } catch (err: any) {
         console.error("Error fetching dashboard:", err);
         setError("Failed to load dashboard data. Please try again later.");
@@ -120,21 +137,58 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ onLogout }) => {
     return () => clearTimeout(timer);
   }, [navigate]);
 
-  // ---------- Logout Function ----------
+  // ---------- Logout ----------
   const handleLogout = async () => {
     if (onLogout) {
       await onLogout();
       return;
     }
     try {
-      await fetch("/api/auth/logout", {
-        method: "POST",
-        credentials: "include",
-      });
+      await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
       navigate("/login");
     } catch (err) {
       console.error("Logout failed:", err);
       navigate("/login");
+    }
+  };
+
+  // ---------- Profile Editing ----------
+  const handleProfileChange = (field: keyof StudentProfile, value: any) => {
+    setUpdatedProfile({ ...updatedProfile, [field]: value });
+  };
+
+  const handleAddItem = (field: "subjects" | "learningGoals", value: string) => {
+    if (!value.trim()) return;
+    setUpdatedProfile({
+      ...updatedProfile,
+      [field]: [...(updatedProfile[field] || []), value.trim()],
+    });
+  };
+
+  const handleRemoveItem = (field: "subjects" | "learningGoals", index: number) => {
+    const updated = [...(updatedProfile[field] || [])];
+    updated.splice(index, 1);
+    setUpdatedProfile({ ...updatedProfile, [field]: updated });
+  };
+
+  const handleSaveProfile = async () => {
+    try {
+      const res = await fetch("/api/student/profile/update", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(updatedProfile),
+      });
+
+      if (!res.ok) throw new Error("Failed to update profile");
+
+      const data = await res.json();
+      setDashboard((prev) => ({ ...prev, student: data.student }));
+      setEditMode(false);
+      alert("Profile updated successfully!");
+    } catch (err) {
+      console.error("Profile update failed:", err);
+      alert("Failed to update profile. Please try again.");
     }
   };
 
@@ -153,19 +207,8 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ onLogout }) => {
   if (error) {
     return (
       <div className="flex flex-col justify-center items-center h-screen text-center bg-gray-50">
-        <div className="bg-red-100 rounded-full p-4 mb-4">
-          <FaBell className="text-red-500 text-2xl" />
-        </div>
-        <h2 className="text-xl font-semibold text-gray-800 mb-2">
-          Oops! Something went wrong
-        </h2>
-        <p className="text-red-500 text-lg mb-6">{error}</p>
-        <button
-          className="bg-purple-600 text-white px-6 py-3 rounded-lg hover:bg-purple-700 transition-colors"
-          onClick={() => window.location.reload()}
-        >
-          Try Again
-        </button>
+        <FaBell className="text-red-500 text-3xl mb-3" />
+        <p className="text-red-600">{error}</p>
       </div>
     );
   }
@@ -182,9 +225,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ onLogout }) => {
       >
         <div className="flex items-center justify-between p-4 border-b">
           {isSidebarOpen && (
-            <h2 className="text-xl font-bold text-purple-600">
-              Student Dashboard
-            </h2>
+            <h2 className="text-xl font-bold text-purple-600">Student Dashboard</h2>
           )}
           <button
             className="text-gray-600 hover:text-purple-600"
@@ -194,7 +235,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ onLogout }) => {
           </button>
         </div>
 
-        {/* Profile */}
+        {/* Profile Summary */}
         {isSidebarOpen && (
           <div className="p-4 border-b text-center">
             <div className="w-16 h-16 mx-auto bg-purple-200 text-purple-800 rounded-full flex items-center justify-center text-2xl font-bold">
@@ -214,14 +255,14 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ onLogout }) => {
                 key={item.path}
                 type="button"
                 onClick={() => setActivePage(item.path)}
-                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors mb-1 ${
+                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg mb-1 transition-colors ${
                   isActive
                     ? "bg-purple-100 text-purple-700 font-semibold"
                     : "text-gray-700 hover:bg-gray-100"
                 }`}
               >
                 {item.icon}
-                {isSidebarOpen && <span className="truncate">{item.name}</span>}
+                {isSidebarOpen && <span>{item.name}</span>}
               </button>
             );
           })}
@@ -229,7 +270,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ onLogout }) => {
 
         {/* Logout */}
         <button
-          className="mt-auto mb-4 mx-4 px-4 py-2 flex items-center gap-2 text-left bg-red-100 hover:bg-red-200 text-red-600 rounded-md transition-colors"
+          className="mt-auto mb-4 mx-4 px-4 py-2 flex items-center gap-2 bg-red-100 hover:bg-red-200 text-red-600 rounded-md transition-colors"
           onClick={handleLogout}
         >
           <FaSignOutAlt />
@@ -239,288 +280,283 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ onLogout }) => {
 
       {/* Main Content */}
       <div className="flex-1 p-6 overflow-y-auto">
+        {/* --- Dashboard Page --- */}
         {activePage === "dashboard" && (
-          <div className="text-gray-900">
+          <div>
             <h1 className="text-3xl font-bold mb-6">
               Welcome back, {student.fullName}! 🎓
             </h1>
-            
-            {/* Stats Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-6">
-              <div className="bg-white rounded-xl p-6 shadow-md">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-gray-600 text-sm">Total Bookings</p>
-                    <p className="text-3xl font-bold text-purple-600">{dashboard.stats.totalBookings}</p>
-                  </div>
-                  <FaCalendar className="text-4xl text-purple-600" />
-                </div>
+
+            {/* Stats */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+              <div className="bg-white p-6 rounded-xl shadow-md">
+                <p className="text-gray-600">Total Bookings</p>
+                <p className="text-3xl font-bold text-purple-600">
+                  {dashboard.stats.totalBookings}
+                </p>
               </div>
-              
-              <div className="bg-white rounded-xl p-6 shadow-md">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-gray-600 text-sm">Confirmed Sessions</p>
-                    <p className="text-3xl font-bold text-green-600">{dashboard.stats.confirmedBookings}</p>
-                  </div>
-                  <FaCheckCircle className="text-4xl text-green-600" />
-                </div>
+              <div className="bg-white p-6 rounded-xl shadow-md">
+                <p className="text-gray-600">Confirmed</p>
+                <p className="text-3xl font-bold text-green-600">
+                  {dashboard.stats.confirmedBookings}
+                </p>
               </div>
-              
-              <div className="bg-white rounded-xl p-6 shadow-md">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-gray-600 text-sm">Study Materials</p>
-                    <p className="text-3xl font-bold text-blue-600">{dashboard.stats.totalMaterials}</p>
-                  </div>
-                  <FaBook className="text-4xl text-blue-600" />
-                </div>
+              <div className="bg-white p-6 rounded-xl shadow-md">
+                <p className="text-gray-600">Study Materials</p>
+                <p className="text-3xl font-bold text-blue-600">
+                  {dashboard.stats.totalMaterials}
+                </p>
               </div>
             </div>
 
-            {/* Quick Actions */}
+            {/* --- Student History --- */}
             <div className="bg-white rounded-xl p-6 shadow-md">
-              <h2 className="text-xl font-bold mb-4">Quick Actions</h2>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <button
-                  onClick={() => setActivePage("study-materials")}
-                  className="p-4 bg-purple-100 hover:bg-purple-200 rounded-lg transition-colors"
-                >
-                  <FaBook className="text-2xl text-purple-600 mb-2 mx-auto" />
-                  <p className="text-sm font-semibold">Study Materials</p>
-                </button>
-                
-                <button
-                  onClick={() => setActivePage("live-tutoring")}
-                  className="p-4 bg-blue-100 hover:bg-blue-200 rounded-lg transition-colors"
-                >
-                  <FaVideo className="text-2xl text-blue-600 mb-2 mx-auto" />
-                  <p className="text-sm font-semibold">Live Tutoring</p>
-                </button>
-                
-                <button
-                  onClick={() => setActivePage("recordings")}
-                  className="p-4 bg-green-100 hover:bg-green-200 rounded-lg transition-colors"
-                >
-                  <FaVideo className="text-2xl text-green-600 mb-2 mx-auto" />
-                  <p className="text-sm font-semibold">Recordings</p>
-                </button>
-                
-                <button
-                  onClick={() => setActivePage("profile")}
-                  className="p-4 bg-indigo-100 hover:bg-indigo-200 rounded-lg transition-colors"
-                >
-                  <FaUser className="text-2xl text-indigo-600 mb-2 mx-auto" />
-                  <p className="text-sm font-semibold">Profile</p>
-                </button>
+              <div className="flex items-center mb-4 gap-2">
+                <FaHistory className="text-purple-600" />
+                <h2 className="text-xl font-bold">Student History</h2>
               </div>
-            </div>
-
-            {/* Recent Bookings */}
-            {dashboard.bookings.length > 0 && (
-              <div className="bg-white rounded-xl p-6 shadow-md mt-6">
-                <h2 className="text-xl font-bold mb-4">Recent Bookings</h2>
+              {dashboard.bookings.filter((b) => b.status === "completed").length > 0 ? (
                 <div className="space-y-3">
-                  {dashboard.bookings.slice(0, 5).map((booking: any, index: number) => (
-                    <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                      <div className="flex items-center gap-3">
-                        <div className={`w-3 h-3 rounded-full ${
-                          booking.status === 'confirmed' ? 'bg-green-500' :
-                          booking.status === 'pending' ? 'bg-yellow-500' : 'bg-gray-500'
-                        }`}></div>
-                        <div>
-                          <p className="font-semibold">{booking.subject || 'General'}</p>
-                          <p className="text-sm text-gray-600">
-                            {booking.status?.charAt(0).toUpperCase() + booking.status?.slice(1) || 'Pending'}
-                          </p>
-                        </div>
+                  {dashboard.bookings
+                    .filter((b) => b.status === "completed")
+                    .slice(0, 5)
+                    .map((b) => (
+                      <div
+                        key={b._id}
+                        className="flex justify-between bg-gray-50 p-3 rounded-lg"
+                      >
+                        <p className="font-semibold">{b.subject || "Session"}</p>
+                        <span className="text-sm text-gray-500">
+                          {new Date(b.createdAt).toLocaleDateString()}
+                        </span>
                       </div>
-                      <span className="text-sm text-gray-500">
-                        {new Date(booking.createdAt).toLocaleDateString()}
-                      </span>
-                    </div>
-                  ))}
+                    ))}
                 </div>
-              </div>
-            )}
+              ) : (
+                <p className="text-gray-500">No history yet.</p>
+              )}
+            </div>
           </div>
         )}
 
+        {/* --- Editable Profile --- */}
         {activePage === "profile" && (
-          <div className="text-gray-900">
-            <h1 className="text-3xl font-bold mb-6">My Profile</h1>
-            
-            <div className="bg-white rounded-xl p-6 shadow-md">
+          <div className="mx-auto max-w-xl">
+            <div className="bg-white rounded-xl shadow p-6">
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-4">
+                <div>
+                  <h1 className="text-2xl font-bold mb-1">My Profile</h1>
+                  <p className="text-gray-500 text-sm">Your basic info—keep it up to date!</p>
+                </div>
+                <button
+                  className="bg-purple-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 mt-3 md:mt-0 disabled:opacity-50"
+                  onClick={() => setEditMode(true)}
+                  disabled={loading}
+                >
+                  <FaEdit /> Edit Profile
+                </button>
+              </div>
+              {/* Profile detail grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                  <label className="text-sm font-semibold text-gray-600 block mb-2">Full Name</label>
-                  <p className="text-gray-900">{student.fullName}</p>
+                  <label className="block text-gray-500 mb-1">Full Name</label>
+                  <div className="font-medium text-lg">{student.fullName}</div>
                 </div>
-                
                 <div>
-                  <label className="text-sm font-semibold text-gray-600 block mb-2">Email</label>
-                  <p className="text-gray-900">{student.email}</p>
+                  <label className="block text-gray-500 mb-1">Email</label>
+                  <div className="text-gray-600">{student.email}</div>
                 </div>
-                
                 <div>
-                  <label className="text-sm font-semibold text-gray-600 block mb-2">Grade</label>
-                  <p className="text-gray-900">{student.grade || 'Not specified'}</p>
+                  <label className="block text-gray-500 mb-1">Grade</label>
+                  <div>{student.grade || <span className="text-gray-400">Not set</span>}</div>
                 </div>
-                
                 <div>
-                  <label className="text-sm font-semibold text-gray-600 block mb-2">School</label>
-                  <p className="text-gray-900">{student.school || 'Not specified'}</p>
+                  <label className="block text-gray-500 mb-1">School</label>
+                  <div>{student.school || <span className="text-gray-400">Not set</span>}</div>
                 </div>
-                
-                {student.subjects && student.subjects.length > 0 && (
-                  <div className="md:col-span-2">
-                    <label className="text-sm font-semibold text-gray-600 block mb-2">Subjects</label>
+                <div className="md:col-span-2">
+                  <label className="block text-gray-500 mb-1">Subjects</label>
+                  {student.subjects && student.subjects.length > 0 ? (
                     <div className="flex flex-wrap gap-2">
-                      {student.subjects.map((subject, index) => (
-                        <span key={index} className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm">
+                      {student.subjects.map((subject, i) => (
+                        <span key={i} className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm">
                           {subject}
                         </span>
                       ))}
                     </div>
-                  </div>
-                )}
-                
-                {student.learningGoals && student.learningGoals.length > 0 && (
-                  <div className="md:col-span-2">
-                    <label className="text-sm font-semibold text-gray-600 block mb-2">Learning Goals</label>
+                  ) : (
+                    <span className="text-gray-400">No subjects</span>
+                  )}
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-gray-500 mb-1">Learning Goals</label>
+                  {student.learningGoals && student.learningGoals.length > 0 ? (
                     <div className="flex flex-wrap gap-2">
-                      {student.learningGoals.map((goal, index) => (
-                        <span key={index} className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm">
+                      {student.learningGoals.map((goal, i) => (
+                        <span key={i} className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm">
                           {goal}
                         </span>
                       ))}
                     </div>
-                  </div>
-                )}
+                  ) : (
+                    <span className="text-gray-400">No goals set</span>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-        )}
-
-        {activePage === "study-materials" && (
-          <div className="text-gray-900">
-            <h1 className="text-3xl font-bold mb-6">Study Materials</h1>
-            
-            {dashboard.studyMaterials && dashboard.studyMaterials.length > 0 ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {dashboard.studyMaterials.map((material: any) => (
-                  <div key={material._id} className="bg-white rounded-xl shadow-md p-6 hover:shadow-lg transition-shadow">
-                    <div className="flex items-start justify-between mb-4">
-                      <div className="flex-1">
-                        <h3 className="font-semibold text-lg mb-2">{material.title}</h3>
-                        <p className="text-sm text-gray-600 mb-2">{material.description}</p>
-                        <div className="flex items-center gap-2 mb-2">
-                          <span className="px-2 py-1 bg-blue-100 text-blue-600 text-xs rounded">
-                            {material.subject}
-                          </span>
-                          <span className="px-2 py-1 bg-green-100 text-green-600 text-xs rounded">
-                            {material.type}
-                          </span>
+            {/* Edit Modal */}
+            {editMode && (
+              <div className="fixed inset-0 flex items-center justify-center z-50 bg-black/30">
+                <div className="bg-white rounded-xl p-8 shadow-lg w-full max-w-lg relative">
+                  <h2 className="text-xl font-bold mb-4">Edit My Profile</h2>
+                  <form
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      // Validate required fields
+                      if (!updatedProfile.fullName.trim()) {
+                        setError("Name is required.");
+                        return;
+                      }
+                      setLoading(true);
+                      setError(null);
+                      try {
+                        const res = await fetch("/api/student/profile/update", {
+                          method: "PUT",
+                          headers: { "Content-Type": "application/json" },
+                          credentials: "include",
+                          body: JSON.stringify(updatedProfile),
+                        });
+                        if (!res.ok) {
+                          let msg = "Failed to update profile.";
+                          try {
+                            const err = await res.json();
+                            if (err?.error || err?.message) msg = err.error || err.message;
+                          } catch {}
+                          setError(msg);
+                          if (window?.toast) window.toast.error(msg);
+                          return;
+                        }
+                        const data = await res.json();
+                        setDashboard((prev) => ({ ...prev, student: data.student }));
+                        setEditMode(false);
+                        if (window?.toast) window.toast.success("Profile updated!");
+                        else alert("Profile updated!");
+                      } catch (err) {
+                        setError("Profile update failed. Network/server error.");
+                        if (window?.toast) window.toast.error("Profile update failed. Network/server error.");
+                      } finally {
+                        setLoading(false);
+                      }
+                    }}
+                  >
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-gray-500 mb-1">Full Name *</label>
+                        <input
+                          type="text"
+                          className="w-full border rounded p-2"
+                          value={updatedProfile.fullName}
+                          onChange={e => handleProfileChange("fullName", e.target.value)}
+                          required
+                          autoFocus
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-gray-500 mb-1">Email</label>
+                        <input type="email" className="w-full border rounded p-2 bg-gray-100" value={updatedProfile.email} disabled />
+                      </div>
+                      <div className="flex gap-2">
+                        <div className="flex-1">
+                          <label className="block text-gray-500 mb-1">Grade</label>
+                          <input
+                            type="text"
+                            className="w-full border rounded p-2"
+                            value={updatedProfile.grade || ""}
+                            onChange={e => handleProfileChange("grade", e.target.value)}
+                          />
+                        </div>
+                        <div className="flex-1">
+                          <label className="block text-gray-500 mb-1">School</label>
+                          <input
+                            type="text"
+                            className="w-full border rounded p-2"
+                            value={updatedProfile.school || ""}
+                            onChange={e => handleProfileChange("school", e.target.value)}
+                          />
                         </div>
                       </div>
-                    </div>
-                    
-                    <div className="flex items-center justify-between text-sm text-gray-500 mb-4">
-                      <div className="flex items-center gap-4">
-                        <span className="flex items-center gap-1">
-                          <FaEye /> {material.views || 0}
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <FaDownload /> {material.downloads || 0}
-                        </span>
+                      <div>
+                        <label className="block text-gray-500 mb-1">Subjects</label>
+                        {/* Chip editor for subjects */}
+                        <div className="flex flex-wrap gap-2 mb-2">
+                          {updatedProfile.subjects?.map((s, i) => (
+                            <span key={i} className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm flex items-center gap-1">
+                              {s}
+                              <button type="button" className="ml-1 text-xs" onClick={() => handleRemoveItem("subjects", i)}>&times;</button>
+                            </span>
+                          ))}
+                        </div>
+                        <input
+                          type="text"
+                          className="w-full border rounded p-2"
+                          placeholder="Add subject and press Enter"
+                          onKeyDown={e => {
+                            if (e.key === "Enter") {
+                              handleAddItem("subjects", e.currentTarget.value);
+                              e.currentTarget.value = "";
+                            }
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-gray-500 mb-1">Learning Goals</label>
+                        {/* Chip editor for goals */}
+                        <div className="flex flex-wrap gap-2 mb-2">
+                          {updatedProfile.learningGoals?.map((g, i) => (
+                            <span key={i} className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm flex items-center gap-1">
+                              {g}
+                              <button type="button" className="ml-1 text-xs" onClick={() => handleRemoveItem("learningGoals", i)}>&times;</button>
+                            </span>
+                          ))}
+                        </div>
+                        <input
+                          type="text"
+                          className="w-full border rounded p-2"
+                          placeholder="Add goal and press Enter"
+                          onKeyDown={e => {
+                            if (e.key === "Enter") {
+                              handleAddItem("learningGoals", e.currentTarget.value);
+                              e.currentTarget.value = "";
+                            }
+                          }}
+                        />
                       </div>
                     </div>
-                    
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => {
-                          const url = material.fileUrl?.startsWith('http') ? material.fileUrl : `${window.location.origin}${material.fileUrl}`;
-                          window.open(url, '_blank');
-                        }}
-                        className="flex-1 bg-blue-600 text-white py-2 px-3 rounded-lg hover:bg-blue-700 transition-colors text-sm flex items-center justify-center gap-2"
-                      >
-                        <FaEye /> View
+                    {error && <div className="text-red-600 text-sm mt-3">{error}</div>}
+                    <div className="flex gap-4 mt-8">
+                      <button type="submit" className="flex-1 bg-purple-600 text-white py-2 rounded-lg hover:bg-purple-700 focus:outline-none disabled:opacity-70" disabled={loading}>
+                        {loading ? "Saving..." : "Save Changes"}
                       </button>
-                      {material.fileUrl && (
-                        <button
-                          onClick={() => {
-                            const url = material.fileUrl?.startsWith('http') ? material.fileUrl : `${window.location.origin}${material.fileUrl}`;
-                            window.open(url, '_blank');
-                          }}
-                          className="bg-green-600 text-white py-2 px-3 rounded-lg hover:bg-green-700 transition-colors text-sm flex items-center justify-center gap-2"
-                        >
-                          <FaDownload /> Download
-                        </button>
-                      )}
+                      <button type="button" className="flex-1 bg-gray-200 text-gray-700 py-2 rounded-lg hover:bg-gray-300" onClick={() => setEditMode(false)} disabled={loading}>
+                        Cancel
+                      </button>
                     </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="bg-white rounded-xl p-12 text-center shadow-md">
-                <FaBook className="text-6xl text-gray-400 mx-auto mb-4" />
-                <h3 className="text-xl font-semibold text-gray-900 mb-2">No Study Materials Yet</h3>
-                <p className="text-gray-600">Study materials will appear here when teachers upload them.</p>
+                  </form>
+                </div>
               </div>
             )}
           </div>
         )}
 
+        {/* Keep other sections (study-materials, tutoring, etc.) unchanged */}
+        {activePage === "study-materials" && <StudyMaterials />}
         {activePage === "live-tutoring" && <LiveTutoring />}
-        
         {activePage === "live-video-chat" && (
           <LiveVideoChat
             onEndCall={() => setActivePage("dashboard")}
             teacherName="Teacher"
             studentName={student.fullName}
           />
-        )}
-        
-        {activePage === "recordings" && (
-          <div className="text-gray-900">
-            <h1 className="text-3xl font-bold mb-6">Session Recordings</h1>
-            
-            {dashboard.bookings && dashboard.bookings.filter((b: any) => b.status === 'completed').length > 0 ? (
-              <div className="space-y-4">
-                {dashboard.bookings
-                  .filter((booking: any) => booking.status === 'completed')
-                  .map((booking: any) => (
-                    <div key={booking._id} className="bg-white rounded-xl shadow-md p-6">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <h3 className="font-semibold text-lg">{booking.subject || 'General Session'}</h3>
-                          <p className="text-sm text-gray-600">
-                            {new Date(booking.createdAt).toLocaleDateString()}
-                          </p>
-                        </div>
-                        {booking.recordingUrl ? (
-                          <button
-                            onClick={() => window.open(booking.recordingUrl, '_blank')}
-                            className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors"
-                          >
-                            <FaVideo className="inline mr-2" />
-                            Watch Recording
-                          </button>
-                        ) : (
-                          <span className="text-gray-400">No recording available</span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-              </div>
-            ) : (
-              <div className="bg-white rounded-xl p-12 text-center shadow-md">
-                <FaVideo className="text-6xl text-gray-400 mx-auto mb-4" />
-                <h3 className="text-xl font-semibold text-gray-900 mb-2">No Recordings Yet</h3>
-                <p className="text-gray-600">Your completed session recordings will appear here.</p>
-              </div>
-            )}
-          </div>
         )}
       </div>
     </div>

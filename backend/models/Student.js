@@ -22,20 +22,20 @@ const studentSchema = new mongoose.Schema({
   updatedAt: { type: Date, default: Date.now }
 });
 
-// Hash password before saving
+// ✅ Hash password before saving
 studentSchema.pre("save", async function (next) {
   if (!this.isModified("password")) return next();
   this.password = await bcrypt.hash(this.password, 10);
   next();
 });
 
-// Compare candidate password with stored hash
+// ✅ Compare password
 studentSchema.methods.comparePassword = function (candidatePassword) {
   return bcrypt.compare(candidatePassword, this.password);
 };
 
-// Update the updatedAt field before saving
-studentSchema.pre('save', function(next) {
+// ✅ Auto-update timestamp
+studentSchema.pre("save", function (next) {
   this.updatedAt = Date.now();
   next();
 });

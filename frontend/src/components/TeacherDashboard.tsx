@@ -58,6 +58,12 @@ interface TeacherDashboardProps {
   onLogout: () => void;
 }
 
+declare global {
+  interface Window {
+    toast?: { success: (msg: string) => void; error: (msg: string) => void };
+  }
+}
+
 const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onLogout }) => {
   const navigate = useNavigate();
 
@@ -1137,139 +1143,95 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onLogout }) => {
 
       {/* Similar modals for Profile, Accept Booking, Reject Booking, Complete Session */}
       {showProfileModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
-            <h3 className="text-xl font-bold mb-4">Edit Profile</h3>
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-8 w-full max-w-2xl shadow-lg relative">
+            <h2 className="text-2xl font-bold mb-1">Edit Profile</h2>
+            <p className="text-gray-500 mb-6">Update your personal and teaching information. Required fields marked *</p>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              if (!profileForm.fullName.trim() || !profileForm.email.trim()) {
+                setError("Full name and email are required.");
+                return;
+              }
+              setLoading(true);
+              setError(null);
+              try {
+                const res = await fetch("/api/teacher/profile", {
+                  method: "PUT",
+                  headers: { "Content-Type": "application/json" },
+                  credentials: "include",
+                  body: JSON.stringify(profileForm),
+                });
+                if (!res.ok) {
+                  let msg = "Failed to update profile.";
+                  try {
+                    const err = await res.json();
+                    if (err?.error || err?.message) msg = err.error || err.message;
+                  } catch {}
+                  setError(msg);
+                  if (window?.toast) window.toast.error(msg);
+                  return;
+                }
+                const updatedTeacher = await res.json();
+                setDashboard(prev => ({ ...prev, teacher: { ...prev.teacher, ...updatedTeacher } }));
+                setShowProfileModal(false);
+                if (window?.toast) window.toast.success("Profile updated!");
+                else alert("Profile updated!");
+              } catch (err) {
+                setError("Profile update failed. Network/server error.");
+                if (window?.toast) window.toast.error("Profile update failed. Network/server error.");
+              } finally {
+                setLoading(false);
+              }
+            }}>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Personal Info */}
                 <div>
-                  <label className="block text-sm font-medium mb-2">Full Name *</label>
-                  <input
-                    type="text"
-                    value={profileForm.fullName}
-                    onChange={(e) => setProfileForm(prev => ({ ...prev, fullName: e.target.value }))}
-                    className="w-full px-3 py-2 border rounded-lg"
-                    placeholder="Enter your full name"
-                  />
+                  <label className="block text-gray-500 mb-1">Full Name *</label>
+                  <input type="text" className="w-full border rounded p-2 mb-3" value={profileForm.fullName} onChange={e => setProfileForm(f => ({ ...f, fullName: e.target.value }))} required />
+                  <label className="block text-gray-500 mb-1">Email *</label>
+                  <input type="email" className="w-full border rounded p-2 mb-3" value={profileForm.email} onChange={e => setProfileForm(f => ({ ...f, email: e.target.value }))} required />
+                  <label className="block text-gray-500 mb-1">Bio</label>
+                  <textarea className="w-full border rounded p-2 mb-3" rows={3} value={profileForm.bio} onChange={e => setProfileForm(f => ({ ...f, bio: e.target.value }))} />
+                  <label className="block text-gray-500 mb-1">Experience</label>
+                  <textarea className="w-full border rounded p-2 mb-3" rows={2} value={profileForm.experience} onChange={e => setProfileForm(f => ({ ...f, experience: e.target.value }))} />
+                  <label className="block text-gray-500 mb-1">Hourly Rate (₹)</label>
+                  <input type="number" className="w-full border rounded p-2" value={profileForm.hourlyRate} onChange={e => setProfileForm(f => ({ ...f, hourlyRate: Number(e.target.value) }))} />
                 </div>
+                {/* Teaching Details */}
                 <div>
-                  <label className="block text-sm font-medium mb-2">Email *</label>
-                  <input
-                    type="email"
-                    value={profileForm.email}
-                    onChange={(e) => setProfileForm(prev => ({ ...prev, email: e.target.value }))}
-                    className="w-full px-3 py-2 border rounded-lg"
-                    placeholder="Enter your email"
-                  />
+                  <label className="block text-gray-500 mb-1">Subjects</label>
+                  <div className="flex flex-wrap gap-2 mb-2">
+                    {profileForm.subjects.map((subject, idx) => (
+                      <span key={idx} className="px-3 py-1 bg-blue-100 text-blue-600 rounded-lg flex items-center gap-2">
+                        {subject}
+                        <button type="button" className="ml-1 text-xs" onClick={() => removeSubject(subject)}>&times;</button>
+                      </span>
+                    ))}
+                  </div>
+                  <input type="text" className="w-full border rounded p-2 mb-3" placeholder="Add subject and press Enter" value={newSubject} onChange={e => setNewSubject(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addSubject(); } }}/>
+                  <label className="block text-gray-500 mb-1">Qualifications</label>
+                  <div className="flex flex-wrap gap-2 mb-2">
+                    {profileForm.qualifications.map((qual, idx) => (
+                      <span key={idx} className="px-3 py-1 bg-green-100 text-green-600 rounded-lg flex items-center gap-2">
+                        {qual}
+                        <button type="button" className="ml-1 text-xs" onClick={() => removeQualification(qual)}>&times;</button>
+                      </span>
+                    ))}
+                  </div>
+                  <input type="text" className="w-full border rounded p-2 mb-3" placeholder="Add qualification and press Enter" value={newQualification} onChange={e => setNewQualification(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addQualification(); } }}/>
                 </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium mb-2">Bio</label>
-                <textarea
-                  value={profileForm.bio}
-                  onChange={(e) => setProfileForm(prev => ({ ...prev, bio: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-lg"
-                  rows={3}
-                />
+              {error && <div className="text-red-600 text-sm mt-3">{error}</div>}
+              <div className="flex gap-4 mt-8">
+                <button type="submit" className="flex-1 bg-purple-600 text-white py-2 rounded-lg hover:bg-purple-700 focus:outline-none disabled:opacity-70" disabled={loading}>
+                  {loading ? "Saving..." : "Save Changes"}
+                </button>
+                <button type="button" className="flex-1 bg-gray-200 text-gray-700 py-2 rounded-lg hover:bg-gray-300" onClick={() => setShowProfileModal(false)} disabled={loading}>
+                  Cancel
+                </button>
               </div>
-              <div>
-                <label className="block text-sm font-medium mb-2">Experience</label>
-                <textarea
-                  value={profileForm.experience}
-                  onChange={(e) => setProfileForm(prev => ({ ...prev, experience: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-lg"
-                  rows={2}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-2">Hourly Rate (₹)</label>
-                <input
-                  type="number"
-                  value={profileForm.hourlyRate}
-                  onChange={(e) => setProfileForm(prev => ({ ...prev, hourlyRate: Number(e.target.value) }))}
-                  className="w-full px-3 py-2 border rounded-lg"
-                  placeholder="Enter your hourly rate"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-2">Subjects</label>
-                <div className="flex gap-2 mb-2">
-                  <input
-                    type="text"
-                    value={newSubject}
-                    onChange={(e) => setNewSubject(e.target.value)}
-                    className="flex-1 px-3 py-2 border rounded-lg"
-                    placeholder="Add a subject"
-                    onKeyPress={(e) => e.key === 'Enter' && addSubject()}
-                  />
-                  <button
-                    onClick={addSubject}
-                    className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition"
-                  >
-                    Add
-                  </button>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {profileForm.subjects.map((subject, index) => (
-                    <span key={index} className="px-3 py-1 bg-blue-100 text-blue-600 rounded-lg flex items-center gap-2">
-                      {subject}
-                      <button
-                        onClick={() => removeSubject(subject)}
-                        className="text-blue-600 hover:text-blue-800"
-                      >
-                        ×
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-2">Qualifications</label>
-                <div className="flex gap-2 mb-2">
-                  <input
-                    type="text"
-                    value={newQualification}
-                    onChange={(e) => setNewQualification(e.target.value)}
-                    className="flex-1 px-3 py-2 border rounded-lg"
-                    placeholder="Add a qualification"
-                    onKeyPress={(e) => e.key === 'Enter' && addQualification()}
-                  />
-                  <button
-                    onClick={addQualification}
-                    className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition"
-                  >
-                    Add
-                  </button>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {profileForm.qualifications.map((qualification, index) => (
-                    <span key={index} className="px-3 py-1 bg-green-100 text-green-600 rounded-lg flex items-center gap-2">
-                      {qualification}
-                      <button
-                        onClick={() => removeQualification(qualification)}
-                        className="text-green-600 hover:text-green-800"
-                      >
-                        ×
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              </div>
-            </div>
-            <div className="flex gap-3 mt-6">
-              <button
-                onClick={handleUpdateProfile}
-                className="flex-1 bg-purple-600 text-white py-2 rounded-lg hover:bg-purple-700"
-              >
-                Update Profile
-              </button>
-              <button
-                onClick={() => setShowProfileModal(false)}
-                className="flex-1 bg-gray-300 text-gray-700 py-2 rounded-lg hover:bg-gray-400"
-              >
-                Cancel
-              </button>
-            </div>
+            </form>
           </div>
         </div>
       )}
