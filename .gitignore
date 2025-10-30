@@ -44,7 +44,7 @@ jspm_packages/
 # dotenv environment variables file
 .env
 
-# parcel-bundler cache (https://parceljs.org/)
+# parcel-bundler cache
 .cache
 .parcel-cache
 
@@ -91,6 +91,3 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
-
-# Problematic file
-"tore ."
