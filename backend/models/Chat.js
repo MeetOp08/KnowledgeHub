@@ -10,6 +10,10 @@ const chatSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+  title: {
+    type: String,
+    default: "New Chat"
+  },
   messages: [{
     role: {
       type: String,

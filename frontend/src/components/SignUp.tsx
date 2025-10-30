@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 
 // Use Vite proxy in dev; override with VITE_API_URL in prod if needed
-const API_BASE_URL = import.meta.env.VITE_API_URL || "";
+const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 interface SignUpProps {
   onSignUp: (role: "student" | "teacher", userInfo: any) => void;
@@ -27,14 +27,17 @@ const SignUp: React.FC<SignUpProps> = ({ onSignUp, onSwitchToLogin }) => {
       // Basic validation
       if (!fullName.trim()) {
         setError("Full name is required");
+        setLoading(false);
         return;
       }
       if (!normalizedEmail) {
         setError("Email is required");
+        setLoading(false);
         return;
       }
       if (password.length < 6) {
         setError("Password must be at least 6 characters");
+        setLoading(false);
         return;
       }
 
@@ -47,11 +50,11 @@ const SignUp: React.FC<SignUpProps> = ({ onSignUp, onSwitchToLogin }) => {
 
       const data = await response.json();
 
-      if (response.ok) {
+      if (response.ok && data.success) {
         alert("Sign up successful!");
         onSignUp(role, data.user);
       } else {
-        setError(data.message || "Sign up failed");
+        setError(data.message || "Sign up failed. Please try again.");
       }
     } catch (error) {
       console.error("❌ Sign up error:", error);

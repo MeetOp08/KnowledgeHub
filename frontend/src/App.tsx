@@ -4,7 +4,6 @@ import Header from "./components/Header";
 import Hero from "./components/Hero";
 import Login from "./components/Login";
 import SignUp from "./components/SignUp";
-import Features from "./components/Features";
 import ForgotPassword from "./components/ForgotPassword";
 import ResetPassword from "./components/ResetPassword";
 import StudyMaterials from "./components/StudyMaterials";
@@ -15,136 +14,122 @@ import StudentDashboard from "./components/StudentDashboard";
 import ProtectedRoute from "./components/ProtectedRoute";
 
 function App() {
-  const [userRole, setUserRole] = useState<"student" | "teacher" | null>(null);
-  const [username, setUsername] = useState<string | null>(null);
+  const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [justLoggedIn, setJustLoggedIn] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
 
+  // ✅ Check session on load and route change
   useEffect(() => {
-    const checkAuthStatus = async () => {
+    const checkSession = async () => {
       try {
         const response = await fetch("/api/auth/me", {
           credentials: "include",
         });
+
         if (response.ok) {
           const data = await response.json();
-          setUserRole(data.user.role);
-          setUsername(data.user.email);
+          setUser(data.user);
 
-          // ✅ Redirect based on role (only if not just logged in)
-          if (!justLoggedIn && (location.pathname === "/" || location.pathname === "/login" || location.pathname === "/signup")) {
-            if (data.user.role === "teacher") {
-              navigate("/teacher-dashboard", { replace: true });
-            } else if (data.user.role === "student") {
-              navigate("/student-dashboard", { replace: true });
-            }
+          // Redirect logged-in users to their dashboards
+          if (["/", "/login", "/signup"].includes(location.pathname)) {
+            if (data.user.role === "teacher") navigate("/teacher/dashboard", { replace: true });
+            else if (data.user.role === "student") navigate("/student/dashboard", { replace: true });
           }
         } else {
-          setUserRole(null);
-          setUsername(null);
+          setUser(null);
         }
       } catch (error) {
-        console.error("Error checking auth status:", error);
-        setUserRole(null);
+        console.error("Error checking session:", error);
       } finally {
         setLoading(false);
       }
     };
-    
-    // Add small delay after login to allow session to be set
-    if (justLoggedIn) {
-      const timer = setTimeout(() => {
-        setJustLoggedIn(false);
-        checkAuthStatus();
-      }, 100);
-      return () => clearTimeout(timer);
-    } else {
-      checkAuthStatus();
-    }
-  }, [location.pathname, navigate, justLoggedIn]);
 
+    checkSession();
+  }, [location.pathname, navigate]);
+
+  // ✅ Handle login and redirect by role
   const handleLogin = (role: "student" | "teacher", userInfo: any) => {
-    setJustLoggedIn(true);
-    setUserRole(role);
-    setUsername(userInfo.email);
-    if (role === "teacher") navigate("/teacher-dashboard");
-    else if (role === "student") navigate("/student-dashboard");
+    setUser(userInfo);
+    if (role === "teacher") navigate("/teacher/dashboard", { replace: true });
+    else navigate("/student/dashboard", { replace: true });
   };
 
-  const handleSignUp = (role: "student" | "teacher", userInfo: any) => {
-    setJustLoggedIn(true);
-    setUserRole(role);
-    setUsername(userInfo.email);
-    if (role === "teacher") navigate("/teacher-dashboard");
-    else navigate("/student-dashboard");
-  };
-
+  // ✅ Handle logout
   const handleLogout = async () => {
-    await fetch("/api/auth/logout", {
-      method: "POST",
-      credentials: "include",
-    });
-    setUserRole(null);
-    setUsername(null);
-    navigate("/");
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "include",
+      });
+    } catch (err) {
+      console.error("Logout failed:", err);
+    }
+    setUser(null);
+    navigate("/", { replace: true });
   };
 
-  if (loading) return <div>Loading...</div>;
-
-  const isLoggedIn = !!userRole;
+  if (loading) return <div className="text-center mt-10">Checking session...</div>;
 
   return (
     <div className="min-h-screen bg-gray-50">
       <Header
         activeSection={location.pathname}
         onNavigate={(path) => navigate(path)}
-        isLoggedIn={isLoggedIn}
-        username={username}
-        role={userRole}
+        isLoggedIn={!!user}
+        username={user?.email}
+        role={user?.role}
         onLogout={handleLogout}
       />
 
       <Routes>
-        {/* Public Routes */}
+        {/* ---------- Public Routes ---------- */}
         <Route path="/" element={<Hero onGetStarted={() => navigate("/login")} />} />
         <Route
           path="/login"
-          element={<Login onLogin={handleLogin} onSwitchToSignUp={() => navigate("/signup")} onSwitchToForgotPassword={() => navigate("/forgot-password")} />}
+          element={
+            <Login
+              onLogin={handleLogin}
+              onSwitchToSignUp={() => navigate("/signup")}
+              onSwitchToForgotPassword={() => navigate("/forgot-password")}
+            />
+          }
         />
         <Route
           path="/signup"
-          element={<SignUp onSignUp={handleSignUp} onSwitchToLogin={() => navigate("/login")} />}
+          element={<SignUp onSignUp={handleLogin} onSwitchToLogin={() => navigate("/login")} />}
         />
-        <Route path="/forgot-password" element={<ForgotPassword onBackToLogin={() => navigate("/login")} />} />
+        <Route
+          path="/forgot-password"
+          element={<ForgotPassword onBackToLogin={() => navigate("/login")} />}
+        />
         <Route path="/reset-password/:token" element={<ResetPassword />} />
 
-        {/* Protected Routes */}
+        {/* ---------- Protected Routes ---------- */}
         <Route
-  path="/teacher-dashboard"
-  element={
-    <ProtectedRoute isLoggedIn={isLoggedIn} allowedRole="teacher" userRole={userRole} loading={loading}>
-      <TeacherDashboard />
-    </ProtectedRoute>
-  }
-/>
-
-        <Route
-            path="/student-dashboard"
+          path="/teacher/dashboard"
           element={
-            <ProtectedRoute isLoggedIn={isLoggedIn}   allowedRole="student" userRole={userRole} loading={loading}>
-              <StudentDashboard />
+            <ProtectedRoute isLoggedIn={!!user} userRole={user?.role} allowedRole="teacher" loading={loading}>
+              <TeacherDashboard onLogout={handleLogout} />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/student/dashboard"
+          element={
+            <ProtectedRoute isLoggedIn={!!user} userRole={user?.role} allowedRole="student" loading={loading}>
+              <StudentDashboard onLogout={handleLogout} />
             </ProtectedRoute>
           }
         />
 
-        {/* Extra Public */}
+        {/* ---------- Public Resources ---------- */}
         <Route path="/study-materials" element={<StudyMaterials />} />
         <Route path="/ai-chat" element={<AIChat />} />
         <Route path="/live-tutoring" element={<LiveTutoring />} />
 
-        {/* Fallback */}
+        {/* ---------- Fallback ---------- */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </div>

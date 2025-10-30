@@ -5,8 +5,6 @@ import {
   FaBook,
   FaUser,
   FaClipboardList,
-  FaComments,
-  FaFileAlt,
   FaSignOutAlt,
   FaPlus,
   FaChartLine,
@@ -15,6 +13,7 @@ import {
   FaBell,
   FaHome,
   FaVideo,
+  FaFileAlt,
 } from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
 import LiveVideoChat from "./LiveVideoChat";
@@ -55,7 +54,11 @@ interface QuickAction {
   action: () => void;
 }
 
-const TeacherDashboard: React.FC = () => {
+interface TeacherDashboardProps {
+  onLogout: () => void;
+}
+
+const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onLogout }) => {
   const navigate = useNavigate();
 
   // ---------- State ----------
@@ -150,20 +153,36 @@ const TeacherDashboard: React.FC = () => {
   useEffect(() => {
     const fetchDashboard = async () => {
       try {
+        setError(null);
+        console.log("📡 Fetching teacher dashboard data...");
         const res = await fetch("/api/teacher/dashboard/data", {
           credentials: "include",
         });
+        
+        console.log("📥 Response status:", res.status);
+        
         if (res.status === 401) {
+          console.error("❌ Not authenticated, redirecting to login");
           setTimeout(() => {
             navigate("/login", { replace: true });
           }, 500);
           return;
         }
-        if (!res.ok) throw new Error("Failed to load dashboard data");
+        
+        if (!res.ok) {
+          const errorText = await res.text();
+          console.error("❌ Failed to load dashboard:", errorText);
+          throw new Error(`Failed to load dashboard data: ${res.status}`);
+        }
+        
         const data = await res.json();
-        setDashboard(data);
+        console.log("✅ Dashboard data received:", data);
+        
+        if (data) {
+          setDashboard(data);
+        }
       } catch (err: any) {
-        console.error("Error fetching dashboard:", err);
+        console.error("❌ Error fetching dashboard:", err);
         setError("Failed to load dashboard data. Please try again later.");
       } finally {
         setLoading(false);
@@ -175,8 +194,6 @@ const TeacherDashboard: React.FC = () => {
   }, [navigate]);
 
   // ---------- Upload Material ----------
-  const BACKEND_BASE = import.meta.env.VITE_API_URL || "";
-
   const handleUploadMaterial = async () => {
     if (!uploadFile || !uploadForm.title || !uploadForm.subject) {
       alert("Please fill in all required fields and select a file");
@@ -192,6 +209,7 @@ const TeacherDashboard: React.FC = () => {
     formData.append("tags", uploadForm.tags);
 
     try {
+      console.log("📤 Uploading material:", uploadForm.title);
       const res = await fetch("/api/study-materials", {
         method: "POST",
         credentials: "include",
@@ -200,6 +218,7 @@ const TeacherDashboard: React.FC = () => {
 
       if (res.ok) {
         const newMaterial = await res.json();
+        console.log("✅ Material uploaded successfully:", newMaterial);
         setDashboard(prev => ({
           ...prev,
           studyMaterials: [newMaterial, ...prev.studyMaterials]
@@ -209,12 +228,13 @@ const TeacherDashboard: React.FC = () => {
         setUploadFile(null);
         alert("Material uploaded successfully!");
       } else {
-        const error = await res.json();
+        const error = await res.json().catch(() => ({ message: "Upload failed" }));
+        console.error("❌ Upload failed:", error);
         alert(error.message || "Failed to upload material");
       }
     } catch (err) {
-      console.error("Upload error:", err);
-      alert("Failed to upload material");
+      console.error("❌ Upload error:", err);
+      alert("Failed to upload material. Please check your connection and try again.");
     }
   };
 
@@ -223,37 +243,40 @@ const TeacherDashboard: React.FC = () => {
     if (!confirm("Are you sure you want to delete this material?")) return;
 
     try {
+      console.log("🗑️ Deleting material:", materialId);
       const res = await fetch(`/api/study-materials/${materialId}`, {
         method: "DELETE",
         credentials: "include",
       });
 
       if (res.ok) {
+        console.log("✅ Material deleted successfully");
         setDashboard(prev => ({
           ...prev,
           studyMaterials: prev.studyMaterials.filter(m => m._id !== materialId)
         }));
         alert("Material deleted successfully!");
       } else {
-        const error = await res.json();
+        const error = await res.json().catch(() => ({ message: "Delete failed" }));
+        console.error("❌ Delete failed:", error);
         alert(error.message || "Failed to delete material");
       }
     } catch (err) {
-      console.error("Delete error:", err);
-      alert("Failed to delete material");
+      console.error("❌ Delete error:", err);
+      alert("Failed to delete material. Please check your connection and try again.");
     }
   };
 
   // ---------- Profile Management ----------
   const openProfileModal = () => {
     setProfileForm({
-      fullName: teacher.fullName,
-      email: teacher.email,
-      bio: teacher.bio || "",
-      experience: teacher.experience || "",
-      subjects: teacher.subjects || [],
-      qualifications: teacher.qualifications || [],
-      hourlyRate: teacher.hourlyRate || 0,
+      fullName: dashboard.teacher.fullName,
+      email: dashboard.teacher.email,
+      bio: dashboard.teacher.bio || "",
+      experience: dashboard.teacher.experience || "",
+      subjects: dashboard.teacher.subjects || [],
+      qualifications: dashboard.teacher.qualifications || [],
+      hourlyRate: dashboard.teacher.hourlyRate || 0,
     });
     setShowProfileModal(true);
   };
@@ -265,6 +288,7 @@ const TeacherDashboard: React.FC = () => {
     }
 
     try {
+      console.log("📝 Updating profile...");
       const res = await fetch("/api/teacher/profile", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -274,6 +298,7 @@ const TeacherDashboard: React.FC = () => {
 
       if (res.ok) {
         const updatedTeacher = await res.json();
+        console.log("✅ Profile updated:", updatedTeacher);
         setDashboard(prev => ({
           ...prev,
           teacher: { ...prev.teacher, ...updatedTeacher }
@@ -281,12 +306,13 @@ const TeacherDashboard: React.FC = () => {
         setShowProfileModal(false);
         alert("Profile updated successfully!");
       } else {
-        const error = await res.json();
+        const error = await res.json().catch(() => ({ message: "Update failed" }));
+        console.error("❌ Profile update failed:", error);
         alert(error.message || "Failed to update profile");
       }
     } catch (err) {
-      console.error("Profile update error:", err);
-      alert("Failed to update profile");
+      console.error("❌ Profile update error:", err);
+      alert("Failed to update profile. Please check your connection and try again.");
     }
   };
 
@@ -335,10 +361,8 @@ const TeacherDashboard: React.FC = () => {
     if (!selectedBooking) return;
     
     try {
-      const API_BASE_URL = import.meta.env.VITE_API_URL || "";
-      const url = `${API_BASE_URL}/api/booking/${selectedBooking._id}/accept`;
-      
-      const res = await fetch(url, {
+      console.log("✅ Accepting booking:", selectedBooking._id);
+      const res = await fetch(`/api/booking/${selectedBooking._id}/accept`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -350,14 +374,16 @@ const TeacherDashboard: React.FC = () => {
         throw new Error(errorData.message || `HTTP ${res.status}: ${res.statusText}`);
       }
       
-      await res.json();
-      alert('Booking accepted successfully! Student has been notified.');
+      const data = await res.json();
+      console.log("✅ Booking accepted:", data);
+      alert('Booking accepted successfully!');
       setShowAcceptModal(false);
-      // Refresh dashboard data
+      setSelectedBooking(null);
+      setMeetingLink("");
       window.location.reload();
     } catch (err: any) {
-      console.error('Error accepting booking:', err);
-      alert(`Error: ${err.message || 'Unable to reach server. Please check if the backend is running.'}`);
+      console.error('❌ Error accepting booking:', err);
+      alert(`Error: ${err.message || 'Unable to reach server.'}`);
     }
   };
 
@@ -371,10 +397,8 @@ const TeacherDashboard: React.FC = () => {
     if (!selectedBooking) return;
     
     try {
-      const API_BASE_URL = import.meta.env.VITE_API_URL || "";
-      const url = `${API_BASE_URL}/api/booking/${selectedBooking._id}/reject`;
-      
-      const res = await fetch(url, {
+      console.log("❌ Rejecting booking:", selectedBooking._id);
+      const res = await fetch(`/api/booking/${selectedBooking._id}/reject`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -386,14 +410,16 @@ const TeacherDashboard: React.FC = () => {
         throw new Error(errorData.message || `HTTP ${res.status}: ${res.statusText}`);
       }
       
-      await res.json();
-      alert('Booking rejected. Student has been notified.');
+      const data = await res.json();
+      console.log("✅ Booking rejected:", data);
+      alert('Booking rejected.');
       setShowRejectModal(false);
-      // Refresh dashboard data
+      setSelectedBooking(null);
+      setRejectReason("");
       window.location.reload();
     } catch (err: any) {
-      console.error('Error rejecting booking:', err);
-      alert(`Error: ${err.message || 'Unable to reach server. Please check if the backend is running.'}`);
+      console.error('❌ Error rejecting booking:', err);
+      alert(`Error: ${err.message || 'Unable to reach server.'}`);
     }
   };
 
@@ -407,10 +433,8 @@ const TeacherDashboard: React.FC = () => {
     if (!selectedBooking) return;
     
     try {
-      const API_BASE_URL = import.meta.env.VITE_API_URL || "";
-      const url = `${API_BASE_URL}/api/booking/${selectedBooking._id}/complete`;
-      
-      const res = await fetch(url, {
+      console.log("✅ Completing session:", selectedBooking._id);
+      const res = await fetch(`/api/booking/${selectedBooking._id}/complete`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -422,14 +446,16 @@ const TeacherDashboard: React.FC = () => {
         throw new Error(errorData.message || `HTTP ${res.status}: ${res.statusText}`);
       }
       
-      await res.json();
-      alert('Session completed successfully! Student has been notified.');
+      const data = await res.json();
+      console.log("✅ Session completed:", data);
+      alert('Session completed successfully!');
       setShowCompleteModal(false);
-      // Refresh dashboard data
+      setSelectedBooking(null);
+      setSessionNotes("");
       window.location.reload();
     } catch (err: any) {
-      console.error('Error completing session:', err);
-      alert(`Error: ${err.message || 'Unable to reach server. Please check if the backend is running.'}`);
+      console.error('❌ Error completing session:', err);
+      alert(`Error: ${err.message || 'Unable to reach server.'}`);
     }
   };
 
@@ -442,16 +468,22 @@ const TeacherDashboard: React.FC = () => {
   // Fetch session recordings
   const fetchRecordings = async () => {
     try {
+      console.log("📼 Fetching recordings...");
       const res = await fetch("/api/booking/recordings", { credentials: 'include' });
       const data = await res.json();
+      console.log("✅ Recordings fetched:", data);
       setRecordings(data.recordings || []);
     } catch (err) {
-      console.error("Error fetching recordings:", err);
+      console.error("❌ Error fetching recordings:", err);
     }
   };
 
   // ---------- Logout ----------
   const handleLogout = async () => {
+    if (onLogout) {
+      await onLogout();
+      return;
+    }
     try {
       await fetch("/api/auth/logout", {
         method: "POST",
@@ -459,7 +491,8 @@ const TeacherDashboard: React.FC = () => {
       });
       navigate("/login");
     } catch (err) {
-      console.error("Logout failed:", err);
+      console.error("❌ Logout failed:", err);
+      navigate("/login");
     }
   };
 
@@ -520,7 +553,6 @@ const TeacherDashboard: React.FC = () => {
               </div>
             </div>
 
-
             {/* Quick Actions */}
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
               <h3 className="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h3>
@@ -547,16 +579,50 @@ const TeacherDashboard: React.FC = () => {
               </div>
             </div>
 
-            {/* Recent Activity */}
+            {/* Stats Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-600">Pending Bookings</h3>
+                    <p className="text-2xl font-bold text-yellow-600">{stats.pendingBookings}</p>
+                  </div>
+                  <FaClipboardList className="text-2xl text-yellow-500" />
+                </div>
+              </div>
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-600">Completed Sessions</h3>
+                    <p className="text-2xl font-bold text-green-600">{stats.completedSessions}</p>
+                  </div>
+                  <FaUsers className="text-2xl text-green-500" />
+                </div>
+              </div>
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-600">Average Rating</h3>
+                    <p className="text-2xl font-bold text-blue-600">{stats.averageRating.toFixed(1)} ⭐</p>
+                  </div>
+                  <FaChartLine className="text-2xl text-blue-500" />
+                </div>
+              </div>
+            </div>
+
+            {/* Recent Bookings */}
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Recent Activity</h3>
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Recent Bookings</h3>
               <div className="space-y-3">
                 {dashboard.bookings.slice(0, 5).map((booking, index) => (
                   <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                     <div className="flex items-center space-x-3">
-                      <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                      <div className={`w-2 h-2 rounded-full ${
+                        booking.status === 'confirmed' ? 'bg-green-500' :
+                        booking.status === 'pending' ? 'bg-yellow-500' : 'bg-gray-500'
+                      }`}></div>
                       <span className="text-sm text-gray-700">
-                        New booking from {booking.studentName}
+                        {booking.studentId?.fullName || 'Student'} - {booking.subject}
                       </span>
                     </div>
                     <span className="text-xs text-gray-500">
@@ -565,34 +631,8 @@ const TeacherDashboard: React.FC = () => {
                   </div>
                 ))}
                 {dashboard.bookings.length === 0 && (
-                  <p className="text-gray-500 text-center py-4">No recent activity</p>
+                  <p className="text-gray-500 text-center py-4">No bookings yet</p>
                 )}
-              </div>
-            </div>
-          </div>
-        );
-
-      case "analytics":
-        return (
-          <div className="space-y-6">
-            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Performance Analytics</h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="text-center p-4 bg-blue-50 rounded-lg">
-                  <FaUsers className="text-blue-600 text-3xl mx-auto mb-2" />
-                  <div className="text-2xl font-bold text-blue-600">{stats.completedSessions}</div>
-                  <div className="text-sm text-gray-600">Completed Sessions</div>
-                </div>
-                <div className="text-center p-4 bg-green-50 rounded-lg">
-                  <FaChartLine className="text-green-600 text-3xl mx-auto mb-2" />
-                  <div className="text-2xl font-bold text-green-600">{stats.averageRating.toFixed(1)}</div>
-                  <div className="text-sm text-gray-600">Average Rating</div>
-                </div>
-                <div className="text-center p-4 bg-purple-50 rounded-lg">
-                  <FaDollarSign className="text-purple-600 text-3xl mx-auto mb-2" />
-                  <div className="text-2xl font-bold text-purple-600">₹{stats.totalEarnings}</div>
-                  <div className="text-sm text-gray-600">Total Earnings</div>
-                </div>
               </div>
             </div>
           </div>
@@ -601,7 +641,6 @@ const TeacherDashboard: React.FC = () => {
       case "study-materials":
         return (
           <div className="space-y-6">
-            {/* Header with Upload Button */}
             <div className="flex justify-between items-center">
               <div>
                 <h3 className="text-2xl font-bold text-gray-900">Study Materials</h3>
@@ -616,7 +655,6 @@ const TeacherDashboard: React.FC = () => {
               </button>
             </div>
 
-            {/* Materials Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {dashboard.studyMaterials.map((material) => (
                 <div key={material._id} className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 hover:shadow-md transition-shadow">
@@ -646,7 +684,7 @@ const TeacherDashboard: React.FC = () => {
                   <div className="flex gap-2">
                     <button
                       onClick={() => {
-                        const url = material.fileUrl?.startsWith('http') ? material.fileUrl : `${BACKEND_BASE}${material.fileUrl}`;
+                        const url = material.fileUrl?.startsWith('http') ? material.fileUrl : `${window.location.origin}${material.fileUrl}`;
                         window.open(url, '_blank');
                       }}
                       className="flex-1 bg-blue-600 text-white py-2 px-3 rounded-lg hover:bg-blue-700 transition-colors text-sm"
@@ -677,7 +715,6 @@ const TeacherDashboard: React.FC = () => {
       case "profile":
         return (
           <div className="space-y-6">
-            {/* Header */}
             <div className="flex justify-between items-center">
               <div>
                 <h3 className="text-2xl font-bold text-gray-900">Profile Management</h3>
@@ -692,7 +729,6 @@ const TeacherDashboard: React.FC = () => {
               </button>
             </div>
 
-            {/* Profile Display */}
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
@@ -742,7 +778,7 @@ const TeacherDashboard: React.FC = () => {
                       <label className="text-sm font-medium text-gray-600">Qualifications</label>
                       <div className="flex flex-wrap gap-2 mt-1">
                         {teacher.qualifications && teacher.qualifications.length > 0 ? (
-                          teacher.qualifications.map((qual: string, index: number) => (
+                          teacher.qualifications.map((qual, index) => (
                             <span key={index} className="px-2 py-1 bg-green-100 text-green-600 text-sm rounded">
                               {qual}
                             </span>
@@ -772,7 +808,6 @@ const TeacherDashboard: React.FC = () => {
           <div className="space-y-6">
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
               <h3 className="text-2xl font-bold text-gray-900 mb-4">Booking Management</h3>
-              <p className="text-gray-600 mb-6">Manage your teaching bookings and sessions</p>
               
               <div className="space-y-4">
                 {dashboard.bookings.map((booking, index) => (
@@ -786,7 +821,7 @@ const TeacherDashboard: React.FC = () => {
                         </div>
                         <div>
                           <h4 className="font-semibold text-gray-900 text-lg">
-                            {booking.studentId?.fullName || booking.studentName || 'Student'}
+                            {booking.studentId?.fullName || 'Student'}
                           </h4>
                           <p className="text-sm text-gray-500">{booking.studentId?.email || ''}</p>
                         </div>
@@ -796,12 +831,10 @@ const TeacherDashboard: React.FC = () => {
                           booking.status === 'confirmed' ? 'bg-green-100 text-green-800' :
                           booking.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
                           booking.status === 'completed' ? 'bg-blue-100 text-blue-800' :
-                          booking.status === 'rejected' ? 'bg-red-100 text-red-800' :
                           'bg-gray-100 text-gray-800'
                         }`}>
                           {booking.status?.charAt(0).toUpperCase() + booking.status?.slice(1) || 'Pending'}
                         </span>
-                        <p className="text-sm text-gray-600 mt-1">₹{booking.amount || booking.price || 0}</p>
                       </div>
                     </div>
 
@@ -813,9 +846,6 @@ const TeacherDashboard: React.FC = () => {
                         <p className="text-sm text-gray-600">
                           <span className="font-medium">Date:</span> {booking.startTime ? new Date(booking.startTime).toLocaleDateString() : new Date(booking.createdAt).toLocaleDateString()}
                         </p>
-                        <p className="text-sm text-gray-600">
-                          <span className="font-medium">Time:</span> {booking.startTime ? new Date(booking.startTime).toLocaleTimeString() : 'TBD'}
-                        </p>
                       </div>
                       <div>
                         {booking.message && (
@@ -823,20 +853,9 @@ const TeacherDashboard: React.FC = () => {
                             <span className="font-medium">Message:</span> "{booking.message}"
                           </p>
                         )}
-                        {booking.meetingLink && booking.status === 'confirmed' && (
-                          <a
-                            href={booking.meetingLink}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-block mt-2 bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700"
-                          >
-                            Join Session
-                          </a>
-                        )}
                       </div>
                     </div>
 
-                    {/* Action buttons based on status */}
                     <div className="flex gap-3 flex-wrap">
                       {booking.status === 'pending' && (
                         <>
@@ -844,50 +863,28 @@ const TeacherDashboard: React.FC = () => {
                             onClick={() => handleAcceptBooking(booking)}
                             className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition text-sm"
                           >
-                            ✓ Accept Booking
+                            ✓ Accept
                           </button>
                           <button
                             onClick={() => handleRejectBooking(booking)}
                             className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition text-sm"
                           >
-                            ✗ Reject Booking
+                            ✗ Reject
                           </button>
                         </>
                       )}
                       
                       {booking.status === 'confirmed' && (
-                        <>
-                          <button
-                            onClick={() => handleCompleteSession(booking)}
-                            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition text-sm"
-                          >
-                            Complete Session
-                          </button>
-                          {booking.meetingLink && (
-                            <a
-                              href={booking.meetingLink}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition text-sm"
-                            >
-                              🎥 Join Session
-                            </a>
-                          )}
-                        </>
+                        <button
+                          onClick={() => handleCompleteSession(booking)}
+                          className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition text-sm"
+                        >
+                          Complete Session
+                        </button>
                       )}
                       
                       {booking.status === 'completed' && (
-                        <div className="flex items-center gap-2 text-sm text-green-600">
-                          <span>✓</span>
-                          <span>Session Completed</span>
-                        </div>
-                      )}
-                      
-                      {booking.status === 'rejected' && (
-                        <div className="flex items-center gap-2 text-sm text-red-600">
-                          <span>✗</span>
-                          <span>Booking Rejected</span>
-                        </div>
+                        <span className="text-green-600">✓ Session Completed</span>
                       )}
                     </div>
                   </div>
@@ -897,7 +894,6 @@ const TeacherDashboard: React.FC = () => {
                   <div className="text-center py-8">
                     <FaClipboardList className="text-4xl text-gray-400 mx-auto mb-4" />
                     <h3 className="text-lg font-semibold text-gray-900 mb-2">No bookings yet</h3>
-                    <p className="text-gray-600">Your booking requests will appear here</p>
                   </div>
                 )}
               </div>
@@ -910,14 +906,13 @@ const TeacherDashboard: React.FC = () => {
           <div className="space-y-6">
             <div className="bg-gradient-to-r from-purple-500 to-indigo-500 text-white p-6 rounded-xl shadow-md">
               <h2 className="text-2xl font-bold mb-2">Live Video Chat</h2>
-              <p className="text-sm opacity-90">Connect with students for live doubt solving sessions</p>
+              <p className="text-sm opacity-90">Connect with students for live sessions</p>
             </div>
             
             <LiveVideoChat 
               onEndCall={() => setActiveTab("overview")}
               teacherName={teacher.fullName}
               studentName="Student"
-              meetingLink={dashboard.bookings.find(b => b.status === 'confirmed' && b.meetingLink)?.meetingLink}
             />
           </div>
         );
@@ -927,18 +922,17 @@ const TeacherDashboard: React.FC = () => {
           <div className="space-y-6">
             <div className="bg-gradient-to-r from-indigo-500 to-purple-500 text-white p-6 rounded-xl shadow-md">
               <h2 className="text-2xl font-bold mb-2">Session Recordings</h2>
-              <p className="text-sm opacity-90">View and manage your completed session recordings</p>
+              <p className="text-sm opacity-90">View your completed session recordings</p>
             </div>
             
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
               <div className="flex justify-between items-center mb-6">
-                <h3 className="text-lg font-semibold text-gray-900">Completed Sessions</h3>
+                <h3 className="text-lg font-semibold text-gray-900">Recordings</h3>
                 <button
-                  type="button"
                   onClick={fetchRecordings}
                   className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition"
                 >
-                  Refresh Recordings
+                  Refresh
                 </button>
               </div>
               
@@ -946,47 +940,35 @@ const TeacherDashboard: React.FC = () => {
                 <div className="text-center py-8">
                   <FaVideo className="text-4xl text-gray-400 mx-auto mb-4" />
                   <h3 className="text-lg font-semibold text-gray-900 mb-2">No recordings yet</h3>
-                  <p className="text-gray-600">Your completed session recordings will appear here</p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {recordings.map((recording) => (
-                    <div key={recording._id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+                    <div key={recording._id} className="border border-gray-200 rounded-lg p-4">
                       <div className="flex items-center gap-3 mb-3">
                         <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-                          <span className="text-blue-600 font-semibold text-sm">
-                            {recording.studentId?.fullName ? recording.studentId.fullName[0].toUpperCase() : 'S'}
+                          <span className="text-blue-600 font-semibold">
+                            {recording.studentId?.fullName ? recording.studentId.fullName[0] : 'S'}
                           </span>
                         </div>
                         <div>
-                          <h4 className="font-semibold text-gray-900">
-                            {recording.studentId?.fullName || 'Student'}
-                          </h4>
+                          <h4 className="font-semibold">{recording.studentId?.fullName || 'Student'}</h4>
                           <p className="text-sm text-gray-500">{recording.subject}</p>
                         </div>
                       </div>
                       
-                      <div className="space-y-2 mb-4">
+                      <div className="space-y-2">
                         <p className="text-sm text-gray-600">
-                          <span className="font-medium">Date:</span> {new Date(recording.completedAt).toLocaleDateString()}
+                          Date: {new Date(recording.completedAt).toLocaleDateString()}
                         </p>
-                        <p className="text-sm text-gray-600">
-                          <span className="font-medium">Duration:</span> {Math.floor(recording.recordingDuration / 60)}:{(recording.recordingDuration % 60).toString().padStart(2, '0')}
-                        </p>
-                        {recording.sessionNotes && (
-                          <p className="text-sm text-gray-700 italic">"{recording.sessionNotes}"</p>
-                        )}
-                      </div>
-                      
-                      <div className="flex gap-2">
                         {recording.recordingUrl && (
                           <a
                             href={recording.recordingUrl}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="flex-1 bg-blue-600 text-white px-3 py-2 rounded text-sm hover:bg-blue-700 text-center"
+                            className="block bg-blue-600 text-white px-3 py-2 rounded text-sm hover:bg-blue-700 text-center"
                           >
-                            🎥 Watch Recording
+                            🎥 Watch
                           </a>
                         )}
                       </div>
@@ -994,43 +976,6 @@ const TeacherDashboard: React.FC = () => {
                   ))}
                 </div>
               )}
-            </div>
-          </div>
-        );
-
-      case "ai-chat":
-        return (
-          <div className="space-y-6">
-            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-              <h3 className="text-2xl font-bold text-gray-900 mb-4">AI Assistant</h3>
-              <p className="text-gray-600 mb-6">Get help with AI-powered teaching assistance</p>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                <div className="p-4 border border-gray-200 rounded-lg hover:shadow-md transition-shadow">
-                  <FaComments className="text-2xl text-blue-600 mb-2" />
-                  <h4 className="font-semibold text-gray-900 mb-1">Lesson Planning</h4>
-                  <p className="text-sm text-gray-600">Get AI help with creating lesson plans</p>
-                </div>
-                
-                <div className="p-4 border border-gray-200 rounded-lg hover:shadow-md transition-shadow">
-                  <FaBook className="text-2xl text-green-600 mb-2" />
-                  <h4 className="font-semibold text-gray-900 mb-1">Content Creation</h4>
-                  <p className="text-sm text-gray-600">Generate educational content and materials</p>
-                </div>
-                
-                <div className="p-4 border border-gray-200 rounded-lg hover:shadow-md transition-shadow">
-                  <FaChartLine className="text-2xl text-purple-600 mb-2" />
-                  <h4 className="font-semibold text-gray-900 mb-1">Student Assessment</h4>
-                  <p className="text-sm text-gray-600">Create quizzes and assessment tools</p>
-                </div>
-              </div>
-              
-              <div className="mt-6 p-4 bg-blue-50 rounded-lg">
-                <p className="text-sm text-blue-800">
-                  <strong>Coming Soon:</strong> Full AI chat interface will be available here. 
-                  For now, you can access the main AI chat from the navigation menu.
-                </p>
-              </div>
             </div>
           </div>
         );
@@ -1049,13 +994,8 @@ const TeacherDashboard: React.FC = () => {
   return (
     <div className="flex min-h-screen bg-gray-50">
       {/* Sidebar */}
-      <div
-        className={`bg-white shadow-lg h-screen flex flex-col transition-all duration-300 ${
-          isSidebarOpen ? "w-64" : "w-20"
-        }`}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-gray-200">
+      <div className={`bg-white shadow-lg h-screen flex flex-col transition-all duration-300 ${isSidebarOpen ? "w-64" : "w-20"}`}>
+        <div className="flex items-center justify-between p-4 border-b">
           {isSidebarOpen && (
             <h2 className="text-xl font-bold text-purple-600">Teacher Dashboard</h2>
           )}
@@ -1068,13 +1008,12 @@ const TeacherDashboard: React.FC = () => {
           </button>
         </div>
 
-        {/* Profile */}
         {isSidebarOpen && (
-          <div className="p-4 border-b border-gray-200">
+          <div className="p-4 border-b">
             <div className="flex items-center space-x-3">
               <div className="w-12 h-12 bg-purple-200 text-purple-800 rounded-full flex items-center justify-center text-lg font-bold">
-              {teacher.fullName ? teacher.fullName[0].toUpperCase() : "T"}
-            </div>
+                {teacher.fullName[0].toUpperCase()}
+              </div>
               <div className="flex-1 min-w-0">
                 <h3 className="font-semibold text-gray-900 truncate">{teacher.fullName}</h3>
                 <p className="text-sm text-gray-500 truncate">{teacher.email}</p>
@@ -1083,88 +1022,72 @@ const TeacherDashboard: React.FC = () => {
           </div>
         )}
 
-        {/* Navigation */}
         <nav className="flex-1 mt-4 px-2">
           {navItems.map((item) => (
             <button
               key={item.path}
               type="button"
-              onClick={(e) => {
-                e.preventDefault();
-                setActiveTab(item.path);
-              }}
+              onClick={() => setActiveTab(item.path)}
               className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors mb-1 ${
                 activeTab === item.path
-                    ? "bg-purple-100 text-purple-700 font-semibold"
-                    : "text-gray-700 hover:bg-gray-100"
+                  ? "bg-purple-100 text-purple-700 font-semibold"
+                  : "text-gray-700 hover:bg-gray-100"
               }`}
             >
               {item.icon}
-              {isSidebarOpen && <span className="truncate">{item.name}</span>}
+              {isSidebarOpen && <span>{item.name}</span>}
             </button>
           ))}
         </nav>
 
-        {/* Logout */}
-        <div className="p-4 border-t border-gray-200">
-        <button
+        <div className="p-4 border-t">
+          <button
             type="button"
-            className="w-full flex items-center gap-3 px-3 py-2 text-left bg-red-50 hover:bg-red-100 text-red-600 rounded-lg transition-colors"
-          onClick={handleLogout}
-        >
-          <FaSignOutAlt />
-          {isSidebarOpen && <span>Logout</span>}
-        </button>
+            className="w-full flex items-center gap-3 px-3 py-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg transition-colors"
+            onClick={handleLogout}
+          >
+            <FaSignOutAlt />
+            {isSidebarOpen && <span>Logout</span>}
+          </button>
         </div>
       </div>
 
-      {/* Main Content */}
       <div className="flex-1 p-6 overflow-y-auto">
         {renderContent()}
       </div>
 
-      {/* Upload Modal */}
+      {/* Modals - Upload, Profile, Accept, Reject, Complete */}
       {showUploadModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 w-full max-w-md mx-4">
-            <h3 className="text-xl font-bold text-gray-900 mb-4">Upload Study Material</h3>
-            
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto">
+            <h3 className="text-xl font-bold mb-4">Upload Study Material</h3>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Title *
-                </label>
+                <label className="block text-sm font-medium mb-2">Title *</label>
                 <input
                   type="text"
                   value={uploadForm.title}
                   onChange={(e) => setUploadForm(prev => ({ ...prev, title: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                  className="w-full px-3 py-2 border rounded-lg"
                   placeholder="Enter material title"
                 />
               </div>
-
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Description
-                </label>
+                <label className="block text-sm font-medium mb-2">Description</label>
                 <textarea
                   value={uploadForm.description}
                   onChange={(e) => setUploadForm(prev => ({ ...prev, description: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                  className="w-full px-3 py-2 border rounded-lg"
                   rows={3}
-                  placeholder="Enter material description"
                 />
               </div>
-
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Subject *
-                  </label>
+                  <label className="block text-sm font-medium mb-2">Subject *</label>
                   <select
                     value={uploadForm.subject}
                     onChange={(e) => setUploadForm(prev => ({ ...prev, subject: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                    className="w-full px-3 py-2 border rounded-lg"
                   >
                     <option value="">Select subject</option>
                     <option value="Mathematics">Mathematics</option>
@@ -1172,62 +1095,38 @@ const TeacherDashboard: React.FC = () => {
                     <option value="Chemistry">Chemistry</option>
                     <option value="Biology">Biology</option>
                     <option value="English">English</option>
-                    <option value="History">History</option>
-                    <option value="Computer Science">Computer Science</option>
-                    <option value="Economics">Economics</option>
                   </select>
                 </div>
-
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Grade
-                  </label>
+                  <label className="block text-sm font-medium mb-2">Grade</label>
                   <input
                     type="text"
                     value={uploadForm.grade}
                     onChange={(e) => setUploadForm(prev => ({ ...prev, grade: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
-                    placeholder="e.g., 10th, 12th"
+                    className="w-full px-3 py-2 border rounded-lg"
+                    placeholder="e.g., 10th"
                   />
                 </div>
               </div>
-
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Tags
-                </label>
-                <input
-                  type="text"
-                  value={uploadForm.tags}
-                  onChange={(e) => setUploadForm(prev => ({ ...prev, tags: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
-                  placeholder="Enter tags separated by commas"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  File *
-                </label>
+                <label className="block text-sm font-medium mb-2">File *</label>
                 <input
                   type="file"
                   onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
-                  accept=".pdf,.doc,.docx,.txt,.jpg,.jpeg,.png,.gif,.mp4,.avi,.mov"
+                  className="w-full px-3 py-2 border rounded-lg"
                 />
               </div>
             </div>
-
-            <div className="flex space-x-3 mt-6">
+            <div className="flex gap-3 mt-6">
               <button
                 onClick={handleUploadMaterial}
-                className="flex-1 bg-purple-600 text-white py-2 px-4 rounded-lg hover:bg-purple-700 transition"
+                className="flex-1 bg-purple-600 text-white py-2 rounded-lg hover:bg-purple-700"
               >
                 Upload
               </button>
               <button
                 onClick={() => setShowUploadModal(false)}
-                className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-400 transition"
+                className="flex-1 bg-gray-300 text-gray-700 py-2 rounded-lg hover:bg-gray-400"
               >
                 Cancel
               </button>
@@ -1236,91 +1135,70 @@ const TeacherDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* Profile Modal */}
+      {/* Similar modals for Profile, Accept Booking, Reject Booking, Complete Session */}
       {showProfileModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl p-6 w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
-            <h3 className="text-xl font-bold text-gray-900 mb-4">Edit Profile</h3>
-            
+            <h3 className="text-xl font-bold mb-4">Edit Profile</h3>
             <div className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Full Name *
-                  </label>
+                  <label className="block text-sm font-medium mb-2">Full Name *</label>
                   <input
                     type="text"
                     value={profileForm.fullName}
                     onChange={(e) => setProfileForm(prev => ({ ...prev, fullName: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                    className="w-full px-3 py-2 border rounded-lg"
                     placeholder="Enter your full name"
                   />
                 </div>
-
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Email *
-                  </label>
+                  <label className="block text-sm font-medium mb-2">Email *</label>
                   <input
                     type="email"
                     value={profileForm.email}
                     onChange={(e) => setProfileForm(prev => ({ ...prev, email: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                    className="w-full px-3 py-2 border rounded-lg"
                     placeholder="Enter your email"
                   />
                 </div>
               </div>
-
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Bio
-                </label>
+                <label className="block text-sm font-medium mb-2">Bio</label>
                 <textarea
                   value={profileForm.bio}
                   onChange={(e) => setProfileForm(prev => ({ ...prev, bio: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                  className="w-full px-3 py-2 border rounded-lg"
                   rows={3}
-                  placeholder="Tell students about yourself..."
                 />
               </div>
-
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Experience
-                </label>
+                <label className="block text-sm font-medium mb-2">Experience</label>
                 <textarea
                   value={profileForm.experience}
                   onChange={(e) => setProfileForm(prev => ({ ...prev, experience: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                  className="w-full px-3 py-2 border rounded-lg"
                   rows={2}
-                  placeholder="Describe your teaching experience..."
                 />
-        </div>
-
+              </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Hourly Rate (₹)
-                </label>
+                <label className="block text-sm font-medium mb-2">Hourly Rate (₹)</label>
                 <input
                   type="number"
                   value={profileForm.hourlyRate}
                   onChange={(e) => setProfileForm(prev => ({ ...prev, hourlyRate: Number(e.target.value) }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                  className="w-full px-3 py-2 border rounded-lg"
                   placeholder="Enter your hourly rate"
                 />
-          </div>
-
-              {/* Subjects */}
+              </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Subjects
-                </label>
+                <label className="block text-sm font-medium mb-2">Subjects</label>
                 <div className="flex gap-2 mb-2">
                   <input
                     type="text"
                     value={newSubject}
                     onChange={(e) => setNewSubject(e.target.value)}
-                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                    className="flex-1 px-3 py-2 border rounded-lg"
                     placeholder="Add a subject"
                     onKeyPress={(e) => e.key === 'Enter' && addSubject()}
                   />
@@ -1344,19 +1222,15 @@ const TeacherDashboard: React.FC = () => {
                     </span>
                   ))}
                 </div>
-          </div>
-
-              {/* Qualifications */}
+              </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Qualifications
-                </label>
+                <label className="block text-sm font-medium mb-2">Qualifications</label>
                 <div className="flex gap-2 mb-2">
                   <input
                     type="text"
                     value={newQualification}
                     onChange={(e) => setNewQualification(e.target.value)}
-                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                    className="flex-1 px-3 py-2 border rounded-lg"
                     placeholder="Add a qualification"
                     onKeyPress={(e) => e.key === 'Enter' && addQualification()}
                   />
@@ -1381,31 +1255,30 @@ const TeacherDashboard: React.FC = () => {
                   ))}
                 </div>
               </div>
-          </div>
-
-            <div className="flex space-x-3 mt-6">
+            </div>
+            <div className="flex gap-3 mt-6">
               <button
                 onClick={handleUpdateProfile}
-                className="flex-1 bg-purple-600 text-white py-2 px-4 rounded-lg hover:bg-purple-700 transition"
+                className="flex-1 bg-purple-600 text-white py-2 rounded-lg hover:bg-purple-700"
               >
                 Update Profile
               </button>
               <button
                 onClick={() => setShowProfileModal(false)}
-                className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-400 transition"
+                className="flex-1 bg-gray-300 text-gray-700 py-2 rounded-lg hover:bg-gray-400"
               >
                 Cancel
               </button>
+            </div>
           </div>
-        </div>
         </div>
       )}
 
       {/* Accept Booking Modal */}
       {showAcceptModal && selectedBooking && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 w-full max-w-md mx-4">
-            <h3 className="text-xl font-bold text-gray-900 mb-4">Accept Booking Request</h3>
+          <div className="bg-white rounded-xl p-6 w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto">
+            <h3 className="text-xl font-bold mb-4">Accept Booking Request</h3>
             <div className="space-y-4">
               <div className="bg-blue-50 p-3 rounded-lg">
                 <p className="text-sm text-blue-800">
@@ -1415,16 +1288,14 @@ const TeacherDashboard: React.FC = () => {
                 </p>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Meeting Link (Optional)
-                </label>
+                <label className="block text-sm font-medium mb-2">Meeting Link (Optional)</label>
                 <div className="flex gap-2">
                   <input
                     type="text"
                     value={meetingLink}
                     onChange={(e) => setMeetingLink(e.target.value)}
+                    className="flex-1 px-3 py-2 border rounded-lg"
                     placeholder="https://meet.google.com/..."
-                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
                   />
                   <button
                     type="button"
@@ -1443,14 +1314,14 @@ const TeacherDashboard: React.FC = () => {
               <button 
                 type="button"
                 onClick={acceptBooking}
-                className="flex-1 bg-green-600 text-white py-2 px-4 rounded-lg hover:bg-green-700 transition"
+                className="flex-1 bg-green-600 text-white py-2 rounded-lg hover:bg-green-700 transition"
               >
                 Accept Booking
               </button>
               <button 
                 type="button"
                 onClick={() => setShowAcceptModal(false)}
-                className="flex-1 bg-gray-200 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-300 transition"
+                className="flex-1 bg-gray-200 text-gray-700 py-2 rounded-lg hover:bg-gray-300 transition"
               >
                 Cancel
               </button>
@@ -1462,8 +1333,8 @@ const TeacherDashboard: React.FC = () => {
       {/* Reject Booking Modal */}
       {showRejectModal && selectedBooking && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 w-full max-w-md mx-4">
-            <h3 className="text-xl font-bold text-gray-900 mb-4">Reject Booking Request</h3>
+          <div className="bg-white rounded-xl p-6 w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto">
+            <h3 className="text-xl font-bold mb-4">Reject Booking Request</h3>
             <div className="space-y-4">
               <div className="bg-red-50 p-3 rounded-lg">
                 <p className="text-sm text-red-800">
@@ -1473,15 +1344,13 @@ const TeacherDashboard: React.FC = () => {
                 </p>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Reason for Rejection (Optional)
-                </label>
+                <label className="block text-sm font-medium mb-2">Reason for Rejection (Optional)</label>
                 <textarea
                   value={rejectReason}
                   onChange={(e) => setRejectReason(e.target.value)}
-                  placeholder="e.g., Not available at this time, Please book for a later slot..."
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500"
+                  className="w-full px-3 py-2 border rounded-lg"
                   rows={3}
+                  placeholder="e.g., Not available at this time, Please book for a later slot..."
                 />
                 <p className="text-xs text-gray-500 mt-1">
                   The student will be notified that you're not available and can book later
@@ -1492,14 +1361,14 @@ const TeacherDashboard: React.FC = () => {
               <button 
                 type="button"
                 onClick={rejectBooking}
-                className="flex-1 bg-red-600 text-white py-2 px-4 rounded-lg hover:bg-red-700 transition"
+                className="flex-1 bg-red-600 text-white py-2 rounded-lg hover:bg-red-700 transition"
               >
                 Reject Booking
               </button>
               <button 
                 type="button"
                 onClick={() => setShowRejectModal(false)}
-                className="flex-1 bg-gray-200 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-300 transition"
+                className="flex-1 bg-gray-200 text-gray-700 py-2 rounded-lg hover:bg-gray-300 transition"
               >
                 Cancel
               </button>
@@ -1511,8 +1380,8 @@ const TeacherDashboard: React.FC = () => {
       {/* Complete Session Modal */}
       {showCompleteModal && selectedBooking && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 w-full max-w-md mx-4">
-            <h3 className="text-xl font-bold text-gray-900 mb-4">Complete Session</h3>
+          <div className="bg-white rounded-xl p-6 w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto">
+            <h3 className="text-xl font-bold mb-4">Complete Session</h3>
             <div className="space-y-4">
               <div className="bg-green-50 p-3 rounded-lg">
                 <p className="text-sm text-green-800">
@@ -1522,15 +1391,13 @@ const TeacherDashboard: React.FC = () => {
                 </p>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Session Notes (Optional)
-                </label>
+                <label className="block text-sm font-medium mb-2">Session Notes (Optional)</label>
                 <textarea
                   value={sessionNotes}
                   onChange={(e) => setSessionNotes(e.target.value)}
-                  placeholder="Brief summary of what was covered in the session..."
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border rounded-lg"
                   rows={4}
+                  placeholder="Brief summary of what was covered in the session..."
                 />
                 <p className="text-xs text-gray-500 mt-1">
                   Add any important points covered or topics discussed
@@ -1541,17 +1408,17 @@ const TeacherDashboard: React.FC = () => {
               <button 
                 type="button"
                 onClick={completeSession}
-                className="flex-1 bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition"
+                className="flex-1 bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition"
               >
                 Complete Session
               </button>
               <button 
                 type="button"
                 onClick={() => setShowCompleteModal(false)}
-                className="flex-1 bg-gray-200 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-300 transition"
+                className="flex-1 bg-gray-200 text-gray-700 py-2 rounded-lg hover:bg-gray-300 transition"
               >
                 Cancel
-              </button>
+              </button>   
             </div>
           </div>
         </div>

@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 
-// Use Vite proxy in dev; override with VITE_API_URL in prod if needed
-const API_BASE_URL = import.meta.env.VITE_API_URL || "";
+const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 interface LoginProps {
   onLogin: (role: "student" | "teacher", userInfo: any) => void;
@@ -24,32 +23,29 @@ const Login: React.FC<LoginProps> = ({ onLogin, onSwitchToSignUp, onSwitchToForg
     try {
       const normalizedEmail = email.toLowerCase().trim();
 
-      // Basic validation
-      if (!normalizedEmail) {
-        setError("Email is required");
-        return;
-      }
-      if (!password) {
-        setError("Password is required");
+      if (!normalizedEmail || !password) {
+        setError("Both email and password are required");
+        setLoading(false);
         return;
       }
 
       const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        credentials: "include", // include session cookies
+        credentials: "include",
         body: JSON.stringify({ email: normalizedEmail, password, role }),
       });
 
       const data = await response.json();
 
-      if (response.ok) {
-        onLogin(role, data.user);
+      if (response.ok && data.success) {
+        console.log("✅ Login successful:", data.user);
+        onLogin(data.user.role, data.user);
       } else {
-        setError(data.message || "Login failed");
+        setError(data.message || "Login failed. Please check your credentials.");
       }
-    } catch (error) {
-      console.error("❌ Login error:", error);
+    } catch (err) {
+      console.error("❌ Login error:", err);
       setError("Unable to reach server. Please try again later.");
     } finally {
       setLoading(false);
@@ -60,9 +56,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, onSwitchToSignUp, onSwitchToForg
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-100 via-white to-purple-100 px-4">
       <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md">
         <h2 className="text-3xl font-bold text-center text-purple-600 mb-2">Welcome Back</h2>
-        <p className="text-sm text-gray-600 text-center mb-6">
-          Sign in to continue learning with KnowledgeHub.
-        </p>
+        <p className="text-sm text-gray-600 text-center mb-6">Sign in to continue learning with KnowledgeHub.</p>
 
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4">

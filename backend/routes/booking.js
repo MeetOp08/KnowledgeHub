@@ -1,213 +1,136 @@
 import express from "express";
+import mongoose from "mongoose";
 import Booking from "../models/Booking.js";
 import Student from "../models/Student.js";
 import Teacher from "../models/Teacher.js";
 import Notification from "../models/Notification.js";
-import StudyMaterial from "../models/StudyMaterial.js";
 
 const router = express.Router();
 
-// Helper: get current user ID and type
-const getUserFromSession = (req) => {
-  if (req.session.student?.id) return { id: req.session.student.id, type: "student" };
-  if (req.session.teacher?.id) return { id: req.session.teacher.id, type: "teacher" };
-  return null;
+// Check if MongoDB is available
+const isMongoDBAvailable = () => {
+  try {
+    return mongoose.connection.readyState === 1;
+  } catch {
+    return false;
+  }
 };
 
-// Teachers list for students to browse (with availability status)
-router.get("/teachers", async (req, res) => {
-  try {
-    const teachers = await Teacher.find({}, "fullName email subjects bio experience").lean();
-    
-    // Check availability for each teacher
-    const currentTime = new Date();
-    const teachersWithAvailability = await Promise.all(
-      teachers.map(async (teacher) => {
-        // Check if teacher is currently busy
-        const currentSession = await Booking.findOne({
-          teacherId: teacher._id,
-          status: { $in: ["confirmed", "pending"] },
-          startTime: { $lte: currentTime },
-          endTime: { $gte: currentTime }
-        });
-
-        // Also check for upcoming sessions in the next 30 minutes
-        const upcomingSession = await Booking.findOne({
-          teacherId: teacher._id,
-          status: { $in: ["confirmed", "pending"] },
-          startTime: { 
-            $gte: currentTime,
-            $lte: new Date(currentTime.getTime() + 30 * 60 * 1000) // Next 30 minutes
-          }
-        });
-
-        let availability = "available";
-        if (currentSession) {
-          availability = "busy";
-        } else if (upcomingSession) {
-          availability = "busy"; // Show as busy if they have a session starting soon
-        }
-
-        return {
-          ...teacher,
-          _id: teacher._id,
-          availability
-        };
-      })
-    );
-
-    res.json({ teachers: teachersWithAvailability });
-  } catch (err) {
-    console.error("Error fetching teachers:", err);
-    res.status(500).json({ message: "Error fetching teachers", error: err.message });
-  }
-});
-
-// Student bookings summary used by frontend
-router.get("/student/bookings", async (req, res) => {
-  try {
-    const studentId = req.session.student?.id || req.session.user?.id;
-    if (!studentId) return res.status(401).json({ message: "Not authenticated" });
-    const bookings = await Booking.find({ studentId }).lean();
-    res.json({ bookings });
-  } catch (err) {
-    res.status(500).json({ message: "Error fetching bookings", error: err.message });
-  }
-});
-
-// Create booking request (student booking teacher)
-router.post("/book", async (req, res) => {
-  try {
-    const studentId = req.session.student?.id || req.session.user?.id;
-    if (!studentId) return res.status(401).json({ message: "Not authenticated" });
-    
-    const { teacherId, subject, message, scheduledDate } = req.body;
-    if (!teacherId || !subject) return res.status(400).json({ message: "Missing required fields" });
-
-    // Check if teacher exists
-    const teacher = await Teacher.findById(teacherId);
-    if (!teacher) return res.status(404).json({ message: "Teacher not found" });
-
-    // Check if teacher is available (not busy with another session)
-    const currentTime = new Date();
-    const existingBooking = await Booking.findOne({
-      teacherId,
-      status: { $in: ["confirmed", "pending"] },
-      startTime: { $lte: currentTime },
-      endTime: { $gte: currentTime }
-    });
-
-    if (existingBooking) {
-      return res.status(400).json({ 
-        message: "Teacher is currently busy with another session. Please try again later or book for a different time." 
-      });
-    }
-
-    // Calculate session time (default 1 hour if not specified)
-    const startTime = scheduledDate ? new Date(scheduledDate) : new Date();
-    const endTime = new Date(startTime.getTime() + 60 * 60 * 1000); // 1 hour later
-
-    const booking = new Booking({
-      studentId,
-      teacherId,
-      subject,
-      startTime,
-      endTime,
-      message,
-      status: "pending",
-      price: 0 // Default free session
-    });
-    await booking.save();
-
-    // Create notification for teacher
-    const notification = new Notification({
-      userId: teacherId,
-      type: "booking",
-      title: "New Booking Request",
-      message: `You have a new booking request for ${subject} from a student.`,
-      relatedId: booking._id,
-      relatedModel: "Booking",
-      priority: "high"
-    });
-    await notification.save();
-
-    res.status(201).json({ 
-      message: "Booking request sent successfully!",
-      booking 
-    });
-  } catch (err) {
-    console.error("Error creating booking:", err);
-    res.status(500).json({ message: "Error creating booking", error: err.message });
-  }
-});
-
-// Get materials by teacher
-router.get("/teacher/:id/materials", async (req, res) => {
-  try {
-    const materials = await StudyMaterial.find({ uploadedBy: req.params.id }).sort({ createdAt: -1 }).lean();
-    res.json({ materials });
-  } catch (err) {
-    res.status(500).json({ message: "Error fetching teacher materials", error: err.message });
-  }
-});
-
-// Existing: Get all bookings for current user
+// Get all bookings for authenticated user
 router.get("/", async (req, res) => {
   try {
-    const user = getUserFromSession(req);
-    if (!user) return res.status(401).json({ message: "Not authenticated" });
-
-    let bookings;
-    if (user.type === "student") {
-      bookings = await Booking.find({ studentId: user.id })
-        .populate("teacherId", "fullName email subjects")
-        .sort({ startTime: -1 });
-    } else {
-      bookings = await Booking.find({ teacherId: user.id })
-        .populate("studentId", "fullName email")
-        .sort({ startTime: -1 });
+    if (!req.session.user) {
+      return res.status(401).json({ message: "Not authenticated" });
     }
 
-    res.json(bookings);
-  } catch (err) {
-    res.status(500).json({ message: "Error fetching bookings", error: err.message });
+    if (!isMongoDBAvailable()) {
+      return res.status(503).json({ message: "Database not available" });
+    }
+
+    let bookings;
+    if (req.session.user.role === "student") {
+      bookings = await Booking.find({ studentId: req.session.user.id })
+        .populate("teacherId", "fullName email subjects hourlyRate")
+        .sort({ createdAt: -1 });
+    } else if (req.session.user.role === "teacher") {
+      bookings = await Booking.find({ teacherId: req.session.user.id })
+        .populate("studentId", "fullName email grade")
+        .sort({ createdAt: -1 });
+    } else {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    res.json({ bookings });
+  } catch (error) {
+    console.error("Get bookings error:", error);
+    res.status(500).json({ message: "Failed to fetch bookings" });
   }
 });
 
-// 📝 Create a new booking (student only)
-router.post("/", async (req, res) => {
+// Get available teachers for booking
+router.get("/teachers", async (req, res) => {
   try {
-    const user = getUserFromSession(req);
-    if (!user || user.type !== "student") return res.status(401).json({ message: "Not authenticated as student" });
-
-    const { teacherId, subject, startTime, endTime, notes, price } = req.body;
-    if (!teacherId || !subject || !startTime || !endTime || !price) {
-      return res.status(400).json({ message: "Missing required fields" });
+    if (!req.session.user || req.session.user.role !== "student") {
+      return res.status(403).json({ message: "Only students can view teachers" });
     }
 
+    if (!isMongoDBAvailable()) {
+      return res.status(503).json({ message: "Database not available" });
+    }
+
+    const teachers = await Teacher.find({ isActive: true }, { password: 0 })
+      .select("fullName email subjects qualifications experience hourlyRate bio availability");
+
+    // Add availability status
+    const teachersWithStatus = teachers.map(teacher => ({
+      ...teacher.toObject(),
+      availability: "available" // Simplified for now
+    }));
+
+    res.json({ teachers: teachersWithStatus });
+  } catch (error) {
+    console.error("Get teachers error:", error);
+    res.status(500).json({ message: "Failed to fetch teachers" });
+  }
+});
+
+// Get student's bookings
+router.get("/student/bookings", async (req, res) => {
+  try {
+    if (!req.session.user || req.session.user.role !== "student") {
+      return res.status(403).json({ message: "Only students can view their bookings" });
+    }
+
+    if (!isMongoDBAvailable()) {
+      return res.status(503).json({ message: "Database not available" });
+    }
+
+    const bookings = await Booking.find({ studentId: req.session.user.id })
+      .populate("teacherId", "fullName email subjects")
+      .sort({ createdAt: -1 });
+
+    res.json({ bookings });
+  } catch (error) {
+    console.error("Get student bookings error:", error);
+    res.status(500).json({ message: "Failed to fetch bookings" });
+  }
+});
+
+// Create new booking
+router.post("/book", async (req, res) => {
+  try {
+    if (!req.session.user || req.session.user.role !== "student") {
+      return res.status(403).json({ message: "Only students can create bookings" });
+    }
+
+    const { teacherId, subject, message, scheduledDate } = req.body;
+
+    if (!teacherId || !subject) {
+      return res.status(400).json({ message: "Teacher ID and subject are required" });
+    }
+
+    if (!isMongoDBAvailable()) {
+      return res.status(503).json({ message: "Database not available" });
+    }
+
+    // Verify teacher exists
     const teacher = await Teacher.findById(teacherId);
-    if (!teacher) return res.status(404).json({ message: "Teacher not found" });
+    if (!teacher) {
+      return res.status(404).json({ message: "Teacher not found" });
+    }
 
-    // Check for conflicting bookings
-    const conflict = await Booking.findOne({
-      teacherId,
-      startTime: { $lt: new Date(endTime) },
-      endTime: { $gt: new Date(startTime) },
-      status: { $in: ["pending", "confirmed"] }
-    });
-
-    if (conflict) return res.status(400).json({ message: "Time slot already booked" });
-
+    // Create booking
     const booking = new Booking({
-      studentId: user.id,
+      studentId: req.session.user.id,
       teacherId,
       subject,
-      startTime: new Date(startTime),
-      endTime: new Date(endTime),
-      notes,
-      price,
-      status: "pending"
+      message: message || "",
+      startTime: scheduledDate ? new Date(scheduledDate) : new Date(),
+      endTime: scheduledDate ? new Date(new Date(scheduledDate).getTime() + 60 * 60 * 1000) : new Date(Date.now() + 60 * 60 * 1000),
+      status: "pending",
+      price: teacher.hourlyRate || 0
     });
+
     await booking.save();
 
     // Create notification for teacher
@@ -215,275 +138,266 @@ router.post("/", async (req, res) => {
       userId: teacherId,
       type: "booking",
       title: "New Booking Request",
-      message: `You have a new booking request for ${subject}`,
-      relatedId: booking._id,
-      priority: "high"
-    });
-    await notification.save();
-
-    res.status(201).json(booking);
-  } catch (err) {
-    res.status(500).json({ message: "Error creating booking", error: err.message });
-  }
-});
-
-// Teacher accept booking request
-router.put("/:id/accept", async (req, res) => {
-  try {
-    const teacherId = req.session.teacher?.id || req.session.user?.id;
-    if (!teacherId) return res.status(401).json({ message: "Not authenticated as teacher" });
-
-    const { meetingLink } = req.body;
-    const booking = await Booking.findById(req.params.id);
-    if (!booking) return res.status(404).json({ message: "Booking not found" });
-
-    // Check if teacher owns this booking
-    if (!booking.teacherId.equals(teacherId)) {
-      return res.status(403).json({ message: "Not authorized" });
-    }
-
-    // Check if booking is still pending
-    if (booking.status !== "pending") {
-      return res.status(400).json({ message: "Booking is no longer pending" });
-    }
-
-    // Update booking status
-    booking.status = "confirmed";
-    if (meetingLink) booking.meetingLink = meetingLink;
-    await booking.save();
-
-    // Notify student
-    const notification = new Notification({
-      userId: booking.studentId,
-      type: "booking",
-      title: "Booking Accepted!",
-      message: `Your booking request for ${booking.subject} has been accepted by the teacher.`,
+      message: `You have a new booking request for ${subject} from ${req.session.user.name}`,
       relatedId: booking._id,
       relatedModel: "Booking",
       priority: "high"
     });
+
     await notification.save();
 
-    res.json({ 
-      message: "Booking accepted successfully!",
-      booking 
+    res.status(201).json({
+      message: "Booking request sent successfully",
+      booking
     });
-  } catch (err) {
-    console.error("Error accepting booking:", err);
-    res.status(500).json({ message: "Error accepting booking", error: err.message });
+  } catch (error) {
+    console.error("Create booking error:", error);
+    res.status(500).json({ message: "Failed to create booking" });
   }
 });
 
-// Teacher reject booking request
-router.put("/:id/reject", async (req, res) => {
+// Accept booking
+router.put("/:id/accept", async (req, res) => {
   try {
-    const teacherId = req.session.teacher?.id || req.session.user?.id;
-    if (!teacherId) return res.status(401).json({ message: "Not authenticated as teacher" });
+    if (!req.session.user || req.session.user.role !== "teacher") {
+      return res.status(403).json({ message: "Only teachers can accept bookings" });
+    }
 
-    const { reason } = req.body;
+    const { meetingLink } = req.body;
+
+    if (!isMongoDBAvailable()) {
+      return res.status(503).json({ message: "Database not available" });
+    }
+
     const booking = await Booking.findById(req.params.id);
-    if (!booking) return res.status(404).json({ message: "Booking not found" });
-
-    // Check if teacher owns this booking
-    if (!booking.teacherId.equals(teacherId)) {
-      return res.status(403).json({ message: "Not authorized" });
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found" });
     }
 
-    // Check if booking is still pending
-    if (booking.status !== "pending") {
-      return res.status(400).json({ message: "Booking is no longer pending" });
+    if (booking.teacherId.toString() !== req.session.user.id) {
+      return res.status(403).json({ message: "You can only accept your own bookings" });
     }
 
-    // Update booking status
-    booking.status = "rejected";
-    if (reason) booking.notes = reason;
+    booking.status = "confirmed";
+    if (meetingLink) {
+      booking.meetingLink = meetingLink;
+    }
     await booking.save();
 
-    // Notify student
+    // Create notification for student
     const notification = new Notification({
       userId: booking.studentId,
       type: "booking",
-      title: "Booking Request Declined",
-      message: `Your booking request for ${booking.subject} has been declined. ${reason ? `Reason: ${reason}` : "The teacher is not available at this time."}`,
+      title: "Booking Confirmed",
+      message: `Your booking for ${booking.subject} has been confirmed`,
       relatedId: booking._id,
       relatedModel: "Booking",
       priority: "medium"
     });
+
     await notification.save();
 
-    res.json({ 
-      message: "Booking request declined and student notified.",
-      booking 
-    });
-  } catch (err) {
-    console.error("Error rejecting booking:", err);
-    res.status(500).json({ message: "Error rejecting booking", error: err.message });
+    res.json({ message: "Booking accepted", booking });
+  } catch (error) {
+    console.error("Accept booking error:", error);
+    res.status(500).json({ message: "Failed to accept booking" });
   }
 });
 
-// Complete session (teacher marks session as completed)
+// Reject booking
+router.put("/:id/reject", async (req, res) => {
+  try {
+    if (!req.session.user || req.session.user.role !== "teacher") {
+      return res.status(403).json({ message: "Only teachers can reject bookings" });
+    }
+
+    const { reason } = req.body;
+
+    if (!isMongoDBAvailable()) {
+      return res.status(503).json({ message: "Database not available" });
+    }
+
+    const booking = await Booking.findById(req.params.id);
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+
+    if (booking.teacherId.toString() !== req.session.user.id) {
+      return res.status(403).json({ message: "You can only reject your own bookings" });
+    }
+
+    booking.status = "rejected";
+    if (reason) {
+      booking.notes = reason;
+    }
+    await booking.save();
+
+    // Create notification for student
+    const notification = new Notification({
+      userId: booking.studentId,
+      type: "booking",
+      title: "Booking Rejected",
+      message: `Your booking for ${booking.subject} has been rejected${reason ? ': ' + reason : ''}`,
+      relatedId: booking._id,
+      relatedModel: "Booking",
+      priority: "medium"
+    });
+
+    await notification.save();
+
+    res.json({ message: "Booking rejected", booking });
+  } catch (error) {
+    console.error("Reject booking error:", error);
+    res.status(500).json({ message: "Failed to reject booking" });
+  }
+});
+
+// Complete booking
 router.put("/:id/complete", async (req, res) => {
   try {
-    const teacherId = req.session.teacher?.id || req.session.user?.id;
-    if (!teacherId) return res.status(401).json({ message: "Not authenticated as teacher" });
+    if (!req.session.user || req.session.user.role !== "teacher") {
+      return res.status(403).json({ message: "Only teachers can complete sessions" });
+    }
 
     const { sessionNotes } = req.body;
+
+    if (!isMongoDBAvailable()) {
+      return res.status(503).json({ message: "Database not available" });
+    }
+
     const booking = await Booking.findById(req.params.id);
-    if (!booking) return res.status(404).json({ message: "Booking not found" });
-
-    // Check if teacher owns this booking
-    if (!booking.teacherId.equals(teacherId)) {
-      return res.status(403).json({ message: "Not authorized" });
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found" });
     }
 
-    // Check if booking is confirmed
-    if (booking.status !== "confirmed") {
-      return res.status(400).json({ message: "Only confirmed bookings can be completed" });
+    if (booking.teacherId.toString() !== req.session.user.id) {
+      return res.status(403).json({ message: "You can only complete your own sessions" });
     }
 
-    // Update booking status
     booking.status = "completed";
     booking.isCompleted = true;
     booking.completedAt = new Date();
-    if (sessionNotes) booking.sessionNotes = sessionNotes;
+    if (sessionNotes) {
+      booking.sessionNotes = sessionNotes;
+    }
     await booking.save();
 
-    // Notify student
+    // Create notification for student
     const notification = new Notification({
       userId: booking.studentId,
       type: "booking",
       title: "Session Completed",
-      message: `Your session for ${booking.subject} has been completed. Please provide your feedback.`,
+      message: `Your session for ${booking.subject} has been completed`,
       relatedId: booking._id,
       relatedModel: "Booking",
       priority: "medium"
     });
+
     await notification.save();
 
-    res.json({ 
-      message: "Session completed successfully!",
-      booking 
-    });
-  } catch (err) {
-    console.error("Error completing session:", err);
-    res.status(500).json({ message: "Error completing session", error: err.message });
-  }
-});
-
-// 📝 Update booking status (student or teacher) - Legacy endpoint
-router.put("/:id/status", async (req, res) => {
-  try {
-    const user = getUserFromSession(req);
-    if (!user) return res.status(401).json({ message: "Not authenticated" });
-
-    const { status, meetingLink } = req.body;
-    const booking = await Booking.findById(req.params.id);
-    if (!booking) return res.status(404).json({ message: "Booking not found" });
-
-    // Permission check
-    const userId = user.id;
-    if (!booking.teacherId.equals(userId) && !booking.studentId.equals(userId)) {
-      return res.status(403).json({ message: "Not authorized" });
-    }
-
-    booking.status = status;
-    if (meetingLink) booking.meetingLink = meetingLink;
-    await booking.save();
-
-    // Notify the other party
-    const otherUserId = booking.teacherId.equals(userId) ? booking.studentId : booking.teacherId;
-    const notification = new Notification({
-      userId: otherUserId,
-      type: "booking",
-      title: "Booking Status Updated",
-      message: `Your booking has been ${status}`,
-      relatedId: booking._id,
-      relatedModel: "Booking"
-    });
-    await notification.save();
-
-    res.json(booking);
-  } catch (err) {
-    res.status(500).json({ message: "Error updating booking", error: err.message });
-  }
-});
-
-// 📝 Delete a booking (student or teacher)
-router.delete("/:id", async (req, res) => {
-  try {
-    const user = getUserFromSession(req);
-    if (!user) return res.status(401).json({ message: "Not authenticated" });
-
-    const booking = await Booking.findById(req.params.id);
-    if (!booking) return res.status(404).json({ message: "Booking not found" });
-
-    const userId = user.id;
-    if (!booking.teacherId.equals(userId) && !booking.studentId.equals(userId)) {
-      return res.status(403).json({ message: "Not authorized" });
-    }
-
-    await Booking.findByIdAndDelete(req.params.id);
-    res.json({ message: "Booking deleted successfully" });
-  } catch (err) {
-    res.status(500).json({ message: "Error deleting booking", error: err.message });
-  }
-});
-
-// Store session recording
-router.post("/:id/recording", async (req, res) => {
-  try {
-    const user = getUserFromSession(req);
-    if (!user) return res.status(401).json({ message: "Not authenticated" });
-
-    const { recordingUrl, duration, notes } = req.body;
-    const bookingId = req.params.id;
-
-    const booking = await Booking.findById(bookingId);
-    if (!booking) return res.status(404).json({ message: "Booking not found" });
-
-    // Check if user is authorized (teacher or student of this booking)
-    if (booking.teacherId.toString() !== user.id && booking.studentId.toString() !== user.id) {
-      return res.status(403).json({ message: "Not authorized" });
-    }
-
-    // Update booking with recording details
-    booking.recordingUrl = recordingUrl;
-    booking.recordingDuration = duration;
-    booking.sessionNotes = notes || booking.sessionNotes;
-    booking.isCompleted = true;
-    booking.completedAt = new Date();
-
-    await booking.save();
-
-    res.json({ message: "Session recording stored successfully", booking });
+    res.json({ message: "Session completed", booking });
   } catch (error) {
-    console.error("Error storing session recording:", error);
-    res.status(500).json({ message: "Internal server error" });
+    console.error("Complete session error:", error);
+    res.status(500).json({ message: "Failed to complete session" });
   }
 });
 
-// Get session recordings for a user
+// Get recordings
 router.get("/recordings", async (req, res) => {
   try {
-    const user = getUserFromSession(req);
-    if (!user) return res.status(401).json({ message: "Not authenticated" });
-
-    let query = {};
-    if (user.type === "student") {
-      query = { studentId: user.id, isCompleted: true, recordingUrl: { $exists: true } };
-    } else if (user.type === "teacher") {
-      query = { teacherId: user.id, isCompleted: true, recordingUrl: { $exists: true } };
+    if (!req.session.user) {
+      return res.status(401).json({ message: "Not authenticated" });
     }
 
-    const recordings = await Booking.find(query)
-      .populate(user.type === "student" ? "teacherId" : "studentId", "fullName email")
-      .sort({ completedAt: -1 })
-      .lean();
+    if (!isMongoDBAvailable()) {
+      return res.status(503).json({ message: "Database not available" });
+    }
 
-    res.json({ recordings });
+    let bookings;
+    if (req.session.user.role === "student") {
+      bookings = await Booking.find({ 
+        studentId: req.session.user.id,
+        status: "completed",
+        recordingUrl: { $exists: true, $ne: null }
+      })
+      .populate("teacherId", "fullName email")
+      .sort({ completedAt: -1 });
+    } else if (req.session.user.role === "teacher") {
+      bookings = await Booking.find({ 
+        teacherId: req.session.user.id,
+        status: "completed",
+        recordingUrl: { $exists: true, $ne: null }
+      })
+      .populate("studentId", "fullName email")
+      .sort({ completedAt: -1 });
+    } else {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    res.json({ recordings: bookings });
   } catch (error) {
-    console.error("Error fetching recordings:", error);
-    res.status(500).json({ message: "Internal server error" });
+    console.error("Fetch recordings error:", error);
+    res.status(500).json({ message: "Failed to fetch recordings" });
+  }
+});
+
+// Get specific booking
+router.get("/:id", async (req, res) => {
+  try {
+    if (!req.session.user) {
+      return res.status(401).json({ message: "Not authenticated" });
+    }
+
+    if (!isMongoDBAvailable()) {
+      return res.status(503).json({ message: "Database not available" });
+    }
+
+    const booking = await Booking.findById(req.params.id)
+      .populate("studentId", "fullName email")
+      .populate("teacherId", "fullName email");
+
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+
+    // Check if user has access to this booking
+    if (req.session.user.role === "student" && booking.studentId._id.toString() !== req.session.user.id) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+    if (req.session.user.role === "teacher" && booking.teacherId._id.toString() !== req.session.user.id) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    res.json({ booking });
+  } catch (error) {
+    console.error("Get booking error:", error);
+    res.status(500).json({ message: "Failed to fetch booking" });
+  }
+});
+
+// Get teacher's materials
+router.get("/teacher/:teacherId/materials", async (req, res) => {
+  try {
+    if (!req.session.user) {
+      return res.status(401).json({ message: "Not authenticated" });
+    }
+
+    if (!isMongoDBAvailable()) {
+      return res.status(503).json({ message: "Database not available" });
+    }
+
+    const StudyMaterial = (await import("../models/StudyMaterial.js")).default;
+    const materials = await StudyMaterial.find({ 
+      uploadedBy: req.params.teacherId,
+      isPublic: true 
+    })
+    .populate("uploadedBy", "fullName email")
+    .sort({ createdAt: -1 });
+
+    res.json({ materials });
+  } catch (error) {
+    console.error("Get teacher materials error:", error);
+    res.status(500).json({ message: "Failed to fetch materials" });
   }
 });
 

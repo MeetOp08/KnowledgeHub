@@ -1,17 +1,14 @@
 import express from "express";
-import mongoose from "mongoose";
-import Teacher from "../models/Teacher.js";
-import Student from "../models/Student.js";
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
+import nodemailer from "nodemailer";
+import mongoose from "mongoose";
+import Student from "../models/Student.js";
+import Teacher from "../models/Teacher.js";
 
 const router = express.Router();
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_FILE = path.join(__dirname, "..", "data.json");
 
-// Check if MongoDB is available (dynamic check)
+// Check if MongoDB is available
 const isMongoDBAvailable = () => {
   try {
     return mongoose.connection.readyState === 1;
@@ -20,167 +17,204 @@ const isMongoDBAvailable = () => {
   }
 };
 
-// File-based database helpers
-const readData = () => {
-  try {
-    const data = fs.readFileSync(DATA_FILE, 'utf8');
-    return JSON.parse(data);
-  } catch (error) {
-    console.error('Error reading data file:', error);
-    return { teachers: [], students: [], sessions: {}, lastId: { teachers: 0, students: 0 } };
-  }
-};
-
-const writeData = (data) => {
-  try {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
-    return true;
-  } catch (error) {
-    console.error('Error writing data file:', error);
-    return false;
-  }
-};
-
-// Helper to select model or collection
-const getUserCollection = (role) => {
-  const normalizedRole = role.toLowerCase();
-  if (normalizedRole === "teacher") return "teachers";
-  if (normalizedRole === "student") return "students";
-  return null;
-};
-
-// File-based password hashing
-const hashPassword = async (password) => {
-  return await bcrypt.hash(password, 10);
-};
-
-const comparePassword = async (password, hashedPassword) => {
-  return await bcrypt.compare(password, hashedPassword);
-};
-
-// Register
+// Registration endpoint
 router.post("/register", async (req, res) => {
   try {
     const { role, name, email, password } = req.body;
-    const normalizedRole = role.toLowerCase();
     
-    if (!["teacher", "student"].includes(normalizedRole)) {
-      return res.status(400).json({ message: "Invalid role" });
+    console.log("Registration request:", { role, name, email });
+    
+    if (!role || !name || !email || !password) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "All fields are required" 
+      });
     }
 
-    // Check if MongoDB is available
-    if (isMongoDBAvailable()) {
-      // Use MongoDB
-      const Model = normalizedRole === "teacher" ? Teacher : Student;
-      const existing = await Model.findOne({ email });
-      if (existing) {
-        return res.status(400).json({ message: `${normalizedRole} already exists` });
-      }
-
-      const user = new Model({ fullName: name, email, password });
-      await user.save();
-
-      res.status(201).json({ 
-        message: "Registered successfully", 
-        user: { id: user._id, email: user.email, role: normalizedRole, name: user.fullName }
+    if (!isMongoDBAvailable()) {
+      return res.status(503).json({ 
+        success: false, 
+        message: "Database not available. Please try again later." 
       });
-    } else {
-      // Use file-based storage
-      const data = readData();
-      const collection = getUserCollection(normalizedRole);
-      
-      // Check if user already exists
-      const existing = data[collection].find(user => user.email === email);
-      if (existing) {
-        return res.status(400).json({ message: `${normalizedRole} already exists` });
-      }
+    }
 
-      // Create new user
-      const hashedPassword = await hashPassword(password);
-      const newUser = {
-        id: (++data.lastId[collection]).toString(),
-        name: name || `${normalizedRole} user`,
+    // Check if user already exists
+    const existingStudent = await Student.findOne({ email });
+    const existingTeacher = await Teacher.findOne({ email });
+    
+    if (existingStudent || existingTeacher) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "User already exists with this email" 
+      });
+    }
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Create user based on role
+    let user;
+    if (role === "student") {
+      user = new Student({
+        fullName: name,
         email,
         password: hashedPassword,
-        role: normalizedRole,
-        createdAt: new Date().toISOString()
-      };
-
-      data[collection].push(newUser);
-      
-      if (writeData(data)) {
-        res.status(201).json({ 
-          message: "Registered successfully", 
-          user: { id: newUser.id, email: newUser.email, role: normalizedRole, name: newUser.name }
-        });
-      } else {
-        res.status(500).json({ message: "Error saving user data" });
-      }
+        role: "student"
+      });
+    } else if (role === "teacher") {
+      user = new Teacher({
+        fullName: name,
+        email,
+        password: hashedPassword,
+        role: "teacher"
+      });
+    } else {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Invalid role. Must be 'student' or 'teacher'" 
+      });
     }
-  } catch (err) {
-    console.error("Registration error:", err);
-    res.status(500).json({ message: "Error registering user" });
+
+    await user.save();
+
+    console.log("User registered successfully:", user.email);
+
+    // Store user in session
+    req.session.user = {
+      id: user._id,
+      email: user.email,
+      role: user.role,
+      name: user.fullName
+    };
+
+    res.status(201).json({
+      success: true,
+      message: "User registered successfully",
+      user: {
+        id: user._id,
+        name: user.fullName,
+        email: user.email,
+        role: user.role
+      }
+    });
+
+  } catch (error) {
+    console.error("Registration error:", error);
+    res.status(500).json({ 
+      success: false, 
+      message: "Registration failed",
+      error: error.message 
+    });
   }
 });
 
-// Login
+// Login endpoint
 router.post("/login", async (req, res) => {
   try {
     const { email, password, role } = req.body;
-    const normalizedRole = role.toLowerCase();
     
-    if (!["teacher", "student"].includes(normalizedRole)) {
-      return res.status(400).json({ message: "Invalid role" });
-    }
-
-    // Check if MongoDB is available
-    if (isMongoDBAvailable()) {
-      // Use MongoDB
-      const Model = normalizedRole === "teacher" ? Teacher : Student;
-      const user = await Model.findOne({ email });
-      
-      if (!user) {
-        return res.status(400).json({ message: "Invalid credentials" });
-      }
-
-      const isMatch = await user.comparePassword(password);
-      if (!isMatch) {
-        return res.status(400).json({ message: "Invalid credentials" });
-      }
-
-      req.session.user = { id: user._id, email: user.email, role: normalizedRole };
-      res.json({ 
-        message: "Login successful", 
-        user: { id: user._id, email: user.email, role: normalizedRole, name: user.fullName }
-      });
-    } else {
-      // Use file-based storage
-      const data = readData();
-      const collection = getUserCollection(normalizedRole);
-      
-      const user = data[collection].find(u => u.email === email);
-      if (!user) {
-        return res.status(400).json({ message: "Invalid credentials" });
-      }
-
-      const isMatch = await comparePassword(password, user.password);
-      if (!isMatch) {
-        return res.status(400).json({ message: "Invalid credentials" });
-      }
-
-      req.session.user = { id: user.id, email: user.email, role: normalizedRole };
-      res.json({ 
-        message: "Login successful", 
-        user: { id: user.id, email: user.email, role: normalizedRole, name: user.name }
+    console.log("Login request:", { email, role });
+    
+    if (!email || !password || !role) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Email, password, and role are required" 
       });
     }
-  } catch (err) {
-    console.error("Login error:", err);
-    res.status(500).json({ message: "Error logging in" });
+
+    if (role !== "student" && role !== "teacher") {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Invalid role. Must be 'student' or 'teacher'" 
+      });
+    }
+
+    if (!isMongoDBAvailable()) {
+      return res.status(503).json({ 
+        success: false, 
+        message: "Database not available. Please try again later." 
+      });
+    }
+
+    // Find user based on role
+    let user = null;
+    if (role === "student") {
+      user = await Student.findOne({ email });
+    } else if (role === "teacher") {
+      user = await Teacher.findOne({ email });
+    }
+
+    if (!user) {
+      return res.status(401).json({ 
+        success: false, 
+        message: "Invalid credentials" 
+      });
+    }
+
+    // Check password
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+    if (!isPasswordValid) {
+      return res.status(401).json({ 
+        success: false, 
+        message: "Invalid credentials" 
+      });
+    }
+
+    // Verify the user's role matches what they selected
+    if (user.role !== role) {
+      return res.status(403).json({ 
+        success: false, 
+        message: `You are registered as a ${user.role}. Please login as ${user.role}.` 
+      });
+    }
+
+    console.log("User logged in successfully:", user.email, "as", user.role);
+
+    // Store user in session
+    req.session.user = {
+      id: user._id,
+      email: user.email,
+      role: user.role,
+      name: user.fullName
+    };
+
+    res.json({
+      success: true,
+      message: "Login successful",
+      user: {
+        id: user._id,
+        name: user.fullName,
+        email: user.email,
+        role: user.role
+      }
+    });
+
+  } catch (error) {
+    console.error("Login error:", error);
+    res.status(500).json({ 
+      success: false, 
+      message: "Login failed",
+      error: error.message 
+    });
   }
 });
 
-// Logout
+// Get current user endpoint
+router.get("/me", (req, res) => {
+  if (req.session.user) {
+    return res.json({
+      user: {
+        id: req.session.user.id,
+        email: req.session.user.email,
+        role: req.session.user.role,
+        name: req.session.user.name
+      },
+    });
+  }
+  res.status(401).json({ message: "Not authenticated" });
+});
+
+// Logout endpoint
 router.post("/logout", (req, res) => {
   req.session.destroy((err) => {
     if (err) return res.status(500).json({ message: "Logout failed" });
@@ -189,29 +223,161 @@ router.post("/logout", (req, res) => {
   });
 });
 
-// Get current user
-router.get("/me", (req, res) => {
-  if (req.session.user) {
-    return res.json({
-      user: {
-        id: req.session.user.id,
-        email: req.session.user.email,
-        role: req.session.user.role.toLowerCase(),
-      },
+// Forgot password endpoint
+router.post("/forgot-password", async (req, res) => {
+  try {
+    const { email } = req.body;
+    
+    if (!email) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Email is required" 
+      });
+    }
+
+    if (!isMongoDBAvailable()) {
+      return res.status(503).json({ 
+        success: false, 
+        message: "Database not available. Please try again later." 
+      });
+    }
+
+    // Find user in both collections
+    let user = await Student.findOne({ email });
+    if (!user) {
+      user = await Teacher.findOne({ email });
+    }
+
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "No user found with this email" 
+      });
+    }
+
+    // Generate reset token
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    user.resetPasswordToken = resetToken;
+    user.resetPasswordExpires = Date.now() + 3600000; // 1 hour
+    await user.save();
+
+    // TODO: Send email with reset link
+    // For now, just return success
+    console.log(`Password reset token for ${email}: ${resetToken}`);
+
+    res.json({
+      success: true,
+      message: "Password reset email sent",
+      resetToken: resetToken // Remove this in production
+    });
+
+  } catch (error) {
+    console.error("Forgot password error:", error);
+    res.status(500).json({ 
+      success: false, 
+      message: "Failed to process request",
+      error: error.message 
     });
   }
-  res.status(401).json({ message: "Not authenticated" });
+});
+
+// Reset password endpoint
+router.post("/reset-password/:token", async (req, res) => {
+  try {
+    const { token } = req.params;
+    const { password } = req.body;
+    
+    if (!password) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Password is required" 
+      });
+    }
+
+    if (!isMongoDBAvailable()) {
+      return res.status(503).json({ 
+        success: false, 
+        message: "Database not available. Please try again later." 
+      });
+    }
+
+    // Find user with valid reset token
+    let user = await Student.findOne({ 
+      resetPasswordToken: token,
+      resetPasswordExpires: { $gt: Date.now() }
+    });
+    
+    if (!user) {
+      user = await Teacher.findOne({ 
+        resetPasswordToken: token,
+        resetPasswordExpires: { $gt: Date.now() }
+      });
+    }
+
+    if (!user) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Invalid or expired reset token" 
+      });
+    }
+
+    // Hash new password
+    const hashedPassword = await bcrypt.hash(password, 10);
+    user.password = hashedPassword;
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpires = undefined;
+    await user.save();
+
+    res.json({
+      success: true,
+      message: "Password reset successfully"
+    });
+
+  } catch (error) {
+    console.error("Reset password error:", error);
+    res.status(500).json({ 
+      success: false, 
+      message: "Failed to reset password",
+      error: error.message 
+    });
+  }
 });
 
 // Get all users (for testing)
-router.get("/users", (req, res) => {
-  if (isMongoDBAvailable()) {
-    res.json({ message: "MongoDB mode - use individual model endpoints" });
-  } else {
-    const data = readData();
+router.get("/users", async (req, res) => {
+  try {
+    if (!isMongoDBAvailable()) {
+      return res.status(503).json({ 
+        success: false, 
+        message: "Database not available" 
+      });
+    }
+
+    const students = await Student.find({}, { password: 0 });
+    const teachers = await Teacher.find({}, { password: 0 });
+    
     res.json({
-      teachers: data.teachers.map(u => ({ id: u.id, name: u.name, email: u.email, role: u.role })),
-      students: data.students.map(u => ({ id: u.id, name: u.name, email: u.email, role: u.role }))
+      students: students.map(user => ({
+        id: user._id,
+        name: user.fullName,
+        email: user.email,
+        role: user.role,
+        createdAt: user.createdAt
+      })),
+      teachers: teachers.map(user => ({
+        id: user._id,
+        name: user.fullName,
+        email: user.email,
+        role: user.role,
+        createdAt: user.createdAt
+      }))
+    });
+  } catch (error) {
+    console.error("Get users error:", error);
+    res.status(500).json({ 
+      success: false, 
+      message: "Failed to get users",
+      error: error.message 
     });
   }
 });

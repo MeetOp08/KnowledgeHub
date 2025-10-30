@@ -1,93 +1,194 @@
 import express from "express";
+import mongoose from "mongoose";
 import Notification from "../models/Notification.js";
 
 const router = express.Router();
 
-// Helper: get current user ID from session
-const getCurrentUserId = (req) => {
-  return req.session.user?.id || req.session.student?.id || req.session.teacher?.id;
+// Check if MongoDB is available
+const isMongoDBAvailable = () => {
+  try {
+    return mongoose.connection.readyState === 1;
+  } catch {
+    return false;
+  }
 };
 
-// Get all notifications for current user
+// Get all notifications for authenticated user
 router.get("/", async (req, res) => {
   try {
-    const userId = getCurrentUserId(req);
-    if (!userId) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.session.user) {
+      return res.status(401).json({ message: "Not authenticated" });
+    }
 
-    const notifications = await Notification.find({ userId })
-      .sort({ createdAt: -1 })
-      .limit(50)
-      .lean();
+    if (!isMongoDBAvailable()) {
+      return res.status(503).json({ message: "Database not available" });
+    }
+
+    const notifications = await Notification.find({ 
+      userId: req.session.user.id 
+    })
+    .sort({ createdAt: -1 })
+    .limit(50);
 
     res.json({ notifications });
-  } catch (err) {
-    console.error("Error fetching notifications:", err);
-    res.status(500).json({ message: "Error fetching notifications", error: err.message });
-  }
-});
-
-// Get unread notifications count
-router.get("/unread-count", async (req, res) => {
-  try {
-    const userId = getCurrentUserId(req);
-    if (!userId) return res.status(401).json({ message: "Not authenticated" });
-
-    const count = await Notification.countDocuments({ userId, isRead: false });
-    res.json({ unreadCount: count });
-  } catch (err) {
-    console.error("Error fetching unread count:", err);
-    res.status(500).json({ message: "Error fetching unread count", error: err.message });
+  } catch (error) {
+    console.error("Get notifications error:", error);
+    res.status(500).json({ message: "Failed to fetch notifications" });
   }
 });
 
 // Mark notification as read
 router.put("/:id/read", async (req, res) => {
   try {
-    const userId = getCurrentUserId(req);
-    if (!userId) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.session.user) {
+      return res.status(401).json({ message: "Not authenticated" });
+    }
 
-    const notification = await Notification.findOne({ _id: req.params.id, userId });
-    if (!notification) return res.status(404).json({ message: "Notification not found" });
+    if (!isMongoDBAvailable()) {
+      return res.status(503).json({ message: "Database not available" });
+    }
+
+    const notification = await Notification.findById(req.params.id);
+    
+    if (!notification) {
+      return res.status(404).json({ message: "Notification not found" });
+    }
+
+    if (notification.userId.toString() !== req.session.user.id) {
+      return res.status(403).json({ message: "Access denied" });
+    }
 
     await notification.markAsRead();
-    res.json({ message: "Notification marked as read" });
-  } catch (err) {
-    console.error("Error marking notification as read:", err);
-    res.status(500).json({ message: "Error marking notification as read", error: err.message });
+
+    res.json({ message: "Notification marked as read", notification });
+  } catch (error) {
+    console.error("Mark notification as read error:", error);
+    res.status(500).json({ message: "Failed to mark notification as read" });
   }
 });
 
 // Mark all notifications as read
-router.put("/mark-all-read", async (req, res) => {
+router.put("/read-all", async (req, res) => {
   try {
-    const userId = getCurrentUserId(req);
-    if (!userId) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.session.user) {
+      return res.status(401).json({ message: "Not authenticated" });
+    }
 
-    await Notification.updateMany(
-      { userId, isRead: false },
-      { isRead: true, readAt: new Date() }
+    if (!isMongoDBAvailable()) {
+      return res.status(503).json({ message: "Database not available" });
+    }
+
+    const result = await Notification.updateMany(
+      { 
+        userId: req.session.user.id,
+        isRead: false 
+      },
+      { 
+        isRead: true,
+        readAt: new Date()
+      }
     );
 
-    res.json({ message: "All notifications marked as read" });
-  } catch (err) {
-    console.error("Error marking all notifications as read:", err);
-    res.status(500).json({ message: "Error marking all notifications as read", error: err.message });
+    res.json({ 
+      message: "All notifications marked as read",
+      updatedCount: result.modifiedCount
+    });
+  } catch (error) {
+    console.error("Mark all notifications as read error:", error);
+    res.status(500).json({ message: "Failed to mark all notifications as read" });
   }
 });
 
 // Delete notification
 router.delete("/:id", async (req, res) => {
   try {
-    const userId = getCurrentUserId(req);
-    if (!userId) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.session.user) {
+      return res.status(401).json({ message: "Not authenticated" });
+    }
 
-    const notification = await Notification.findOneAndDelete({ _id: req.params.id, userId });
-    if (!notification) return res.status(404).json({ message: "Notification not found" });
+    if (!isMongoDBAvailable()) {
+      return res.status(503).json({ message: "Database not available" });
+    }
 
-    res.json({ message: "Notification deleted" });
-  } catch (err) {
-    console.error("Error deleting notification:", err);
-    res.status(500).json({ message: "Error deleting notification", error: err.message });
+    const notification = await Notification.findById(req.params.id);
+    
+    if (!notification) {
+      return res.status(404).json({ message: "Notification not found" });
+    }
+
+    if (notification.userId.toString() !== req.session.user.id) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    await Notification.findByIdAndDelete(req.params.id);
+
+    res.json({ message: "Notification deleted successfully" });
+  } catch (error) {
+    console.error("Delete notification error:", error);
+    res.status(500).json({ message: "Failed to delete notification" });
+  }
+});
+
+// Get unread notification count
+router.get("/unread/count", async (req, res) => {
+  try {
+    if (!req.session.user) {
+      return res.status(401).json({ message: "Not authenticated" });
+    }
+
+    if (!isMongoDBAvailable()) {
+      return res.status(503).json({ message: "Database not available" });
+    }
+
+    const count = await Notification.countDocuments({
+      userId: req.session.user.id,
+      isRead: false
+    });
+
+    res.json({ unreadCount: count });
+  } catch (error) {
+    console.error("Get unread count error:", error);
+    res.status(500).json({ message: "Failed to get unread count" });
+  }
+});
+
+// Create notification (for internal use)
+router.post("/", async (req, res) => {
+  try {
+    if (!req.session.user) {
+      return res.status(401).json({ message: "Not authenticated" });
+    }
+
+    const { userId, type, title, message, priority, relatedId, relatedModel, actionUrl } = req.body;
+
+    if (!userId || !type || !title || !message) {
+      return res.status(400).json({ message: "Missing required fields" });
+    }
+
+    if (!isMongoDBAvailable()) {
+      return res.status(503).json({ message: "Database not available" });
+    }
+
+    const notification = new Notification({
+      userId,
+      type,
+      title,
+      message,
+      priority: priority || "medium",
+      relatedId,
+      relatedModel,
+      actionUrl
+    });
+
+    await notification.save();
+
+    res.status(201).json({ 
+      message: "Notification created successfully",
+      notification 
+    });
+  } catch (error) {
+    console.error("Create notification error:", error);
+    res.status(500).json({ message: "Failed to create notification" });
   }
 });
 

@@ -1,18 +1,27 @@
 import React, { useState, useRef, useEffect } from "react";
 import {
-  Send, Bot, User, BookOpen, Calculator, Lightbulb, Clock, ArrowLeft,
+  Send, Bot, User, BookOpen, Calculator, Lightbulb, Clock, ArrowLeft, Plus, MessageSquare
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 
 // Use Vite proxy in dev; override with VITE_API_URL in prod if needed
-const API_BASE_URL = import.meta.env.VITE_API_URL || "";
+const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 interface Message {
   id: string;
   type: "user" | "ai";
   content: string;
   timestamp: Date;
+}
+
+interface ChatSession {
+  sessionId: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  messageCount: number;
+  lastMessage: string;
 }
 
 const AIChat: React.FC = () => {
@@ -23,7 +32,9 @@ const AIChat: React.FC = () => {
   const navigate = useNavigate();
 
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [userId, setUserId] = useState<string>("student123"); // Will be updated with actual user ID
+  const [userId, setUserId] = useState<string>("student123");
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
   const quickActions = [
     { icon: Calculator, text: "Solve Math Problem", color: "from-blue-500 to-blue-600" },
@@ -40,55 +51,88 @@ const AIChat: React.FC = () => {
     scrollToBottom();
   }, [messages]);
 
+  // Load chat sessions
+  const loadChatSessions = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/chat/sessions/${userId}`, {
+        credentials: 'include'
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.sessions) {
+          setChatSessions(data.sessions);
+        }
+      }
+    } catch (err) {
+      console.error("Error loading chat sessions:", err);
+    }
+  };
+
+  // Load specific chat session
+  const loadChatSession = async (sessionIdToLoad: string) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/chat/history/${sessionIdToLoad}?userId=${userId}`, {
+        credentials: 'include'
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.messages) {
+          const loaded = data.messages.map((m: any) => ({
+            id: m._id || crypto.randomUUID(),
+            type: m.role === "user" ? "user" : "ai",
+            content: m.content,
+            timestamp: new Date(m.timestamp),
+          }));
+          setMessages(loaded);
+          setSessionId(sessionIdToLoad);
+          localStorage.setItem("chatSessionId", sessionIdToLoad);
+        }
+      }
+    } catch (err) {
+      console.error("Error loading chat history:", err);
+    }
+  };
+
+  // Create new chat
+  const createNewChat = () => {
+    const newSessionId = crypto.randomUUID();
+    setSessionId(newSessionId);
+    setMessages([]);
+    localStorage.setItem("chatSessionId", newSessionId);
+    loadChatSessions(); // Refresh list
+  };
+
   // Get current user info and init session + load history
   useEffect(() => {
-    // Get current user info
-    const fetchUserInfo = async () => {
+    const initializeChat = async () => {
+      // Get current user info
       try {
         const res = await fetch(`${API_BASE_URL}/api/auth/me`, { credentials: 'include' });
         if (res.ok) {
           const userData = await res.json();
-          setUserId(userData.user?.id || "student123");
+          const fetchedUserId = userData.user?.id || `user_${Date.now()}`;
+          setUserId(fetchedUserId);
+
+          // Load chat sessions
+          await loadChatSessions();
+
+          // Initialize current session
+          let storedSession = localStorage.getItem("chatSessionId");
+          if (!storedSession) {
+            storedSession = crypto.randomUUID();
+            localStorage.setItem("chatSessionId", storedSession);
+          }
+          setSessionId(storedSession);
+
+          // Load current session history if it exists
+          await loadChatSession(storedSession);
         }
       } catch (err) {
         console.error("Error fetching user info:", err);
       }
     };
 
-    fetchUserInfo();
-
-    // Initialize session
-    let storedSession = localStorage.getItem("chatSessionId");
-    if (!storedSession) {
-      storedSession = crypto.randomUUID();
-      localStorage.setItem("chatSessionId", storedSession);
-    }
-    setSessionId(storedSession);
-
-    // Load chat history
-    const loadHistory = async () => {
-      try {
-        const res = await fetch(`${API_BASE_URL}/api/chat/history/${storedSession}?userId=${userId}`, {
-          credentials: 'include'
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.messages) {
-            const loaded = data.messages.map((m: any) => ({
-              id: m._id || crypto.randomUUID(),
-              type: m.role === "user" ? "user" : "ai",
-              content: m.content,
-              timestamp: new Date(m.timestamp),
-            }));
-            setMessages(loaded);
-          }
-        }
-      } catch (err) {
-        console.error("Error loading history:", err);
-      }
-    };
-
-    loadHistory();
+    initializeChat();
   }, []);
 
   const sendMessage = async () => {
@@ -123,6 +167,9 @@ const AIChat: React.FC = () => {
       };
 
       setMessages((prev) => [...prev, aiResponse]);
+      
+      // Refresh chat sessions to update the list
+      loadChatSessions();
     } catch (err) {
       console.error("Chat error:", err);
       setMessages((prev) => [
@@ -139,24 +186,90 @@ const AIChat: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Header */}
-        <div className="mb-8">
-          <button 
-            onClick={() => navigate("/")} 
-            className="mb-4 flex items-center text-sm text-blue-600 hover:text-blue-800 hover:underline transition-colors"
-          >
-            <ArrowLeft className="h-4 w-4 mr-2" /> Back to Home
-          </button>
-
-          <div className="text-center">
-            <h1 className="text-4xl font-bold text-gray-900 mb-3">🤖 AI Study Assistant</h1>
-            <p className="text-lg text-gray-600 max-w-2xl mx-auto">
-              Get instant help with your studies, solve problems, and learn better with our AI-powered assistant
-            </p>
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50 flex">
+      {/* Sidebar - Previous Chats */}
+      <div className={`${isSidebarOpen ? 'w-80' : 'w-0'} transition-all duration-300 overflow-hidden bg-white border-r border-gray-200 flex flex-col`}>
+        <div className="p-4 border-b border-gray-200">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-gray-900">Chat History</h2>
+            <button
+              onClick={() => setIsSidebarOpen(false)}
+              className="p-1 hover:bg-gray-100 rounded"
+            >
+              ←
+            </button>
           </div>
+          <button
+            onClick={createNewChat}
+            className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-2 px-4 rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all flex items-center justify-center gap-2"
+          >
+            <Plus className="h-4 w-4" />
+            New Chat
+          </button>
         </div>
+        
+        <div className="flex-1 overflow-y-auto p-2">
+          {chatSessions.map((session) => (
+            <button
+              key={session.sessionId}
+              onClick={() => loadChatSession(session.sessionId)}
+              className={`w-full text-left p-3 rounded-lg mb-2 transition-colors ${
+                sessionId === session.sessionId 
+                  ? 'bg-blue-100 border-blue-500 border-2' 
+                  : 'hover:bg-gray-100 border border-gray-200'
+              }`}
+            >
+              <div className="flex items-start gap-2">
+                <MessageSquare className="h-4 w-4 mt-1 text-gray-500 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-sm text-gray-900 truncate">{session.title}</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {session.messageCount} messages
+                  </p>
+                  <p className="text-xs text-gray-400 mt-1">
+                    {new Date(session.updatedAt).toLocaleDateString()} {new Date(session.updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  </p>
+                </div>
+              </div>
+            </button>
+          ))}
+          {chatSessions.length === 0 && (
+            <div className="text-center py-8 text-gray-500 text-sm">
+              No previous chats. Start a new conversation!
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Main Chat Area */}
+      <div className="flex-1 flex flex-col">
+        <div className="max-w-6xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8">
+          {/* Header */}
+          <div className="mb-8">
+            <div className="flex items-center justify-between mb-4">
+              <button 
+                onClick={() => navigate("/")} 
+                className="flex items-center text-sm text-blue-600 hover:text-blue-800 hover:underline transition-colors"
+              >
+                <ArrowLeft className="h-4 w-4 mr-2" /> Back to Home
+              </button>
+              {!isSidebarOpen && (
+                <button
+                  onClick={() => setIsSidebarOpen(true)}
+                  className="p-2 hover:bg-gray-100 rounded"
+                >
+                  →
+                </button>
+              )}
+            </div>
+
+            <div className="text-center">
+              <h1 className="text-4xl font-bold text-gray-900 mb-3">🤖 AI Study Assistant</h1>
+              <p className="text-lg text-gray-600 max-w-2xl mx-auto">
+                Get instant help with your studies, solve problems, and learn better with our AI-powered assistant
+              </p>
+            </div>
+          </div>
 
         <div className="bg-white rounded-3xl shadow-2xl overflow-hidden border border-gray-100">
           {/* Quick Actions */}
@@ -302,6 +415,7 @@ const AIChat: React.FC = () => {
               Press Enter to send • AI responses may take a few seconds
             </p>
           </div>
+        </div>
         </div>
       </div>
     </div>

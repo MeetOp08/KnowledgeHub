@@ -1,258 +1,307 @@
 import express from "express";
+import mongoose from "mongoose";
 import multer from "multer";
 import path from "path";
 import { fileURLToPath } from "url";
 import StudyMaterial from "../models/StudyMaterial.js";
-import fs from "fs";
 
 const router = express.Router();
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const uploadDir = path.join(__dirname, "../../uploads");
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-    cb(null, uploadDir);
+  destination: function (req, file, cb) {
+    cb(null, path.join(__dirname, "../../uploads/"));
   },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    cb(null, file.fieldname + "-" + uniqueSuffix + path.extname(file.originalname));
+  filename: function (req, file, cb) {
+    cb(null, `file-${Date.now()}-${Math.floor(Math.random() * 1e9)}.${file.originalname.split('.').pop()}`);
   }
 });
 
-const upload = multer({ 
-  storage: storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
-  fileFilter: (req, file, cb) => {
-    const allowedTypes = /pdf|doc|docx|txt|jpg|jpeg|png|gif|mp4|avi|mov/;
-    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-    const mimetype = allowedTypes.test(file.mimetype);
+const upload = multer({ storage: storage });
 
-    if (mimetype && extname) {
-      return cb(null, true);
-    } else {
-      cb(new Error("Invalid file type"));
-    }
+// Check if MongoDB is available
+const isMongoDBAvailable = () => {
+  try {
+    return mongoose.connection.readyState === 1;
+  } catch {
+    return false;
   }
-});
+};
 
-// 📝 Get all study materials
+// Get all study materials
 router.get("/", async (req, res) => {
   try {
+    if (!isMongoDBAvailable()) {
+      return res.status(503).json({ message: "Database not available" });
+    }
+
     const { subject, grade, type, search } = req.query;
     let query = { isPublic: true };
 
-    if (subject) query.subject = subject;
-    if (grade) query.grade = grade;
-    if (type) query.type = type;
+    // Apply filters
+    if (subject) {
+      query.subject = { $regex: subject, $options: 'i' };
+    }
+    if (grade) {
+      query.grade = { $regex: grade, $options: 'i' };
+    }
+    if (type) {
+      query.type = type;
+    }
     if (search) {
       query.$or = [
-        { title: { $regex: search, $options: "i" } },
-        { description: { $regex: search, $options: "i" } },
-        { tags: { $in: [new RegExp(search, "i")] } }
+        { title: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } },
+        { tags: { $in: [new RegExp(search, 'i')] } }
       ];
     }
 
     const materials = await StudyMaterial.find(query)
-      .populate("uploadedBy", "fullName")
+      .populate("uploadedBy", "fullName email")
       .sort({ createdAt: -1 });
 
     res.json({ materials });
-  } catch (err) {
-    res.status(500).json({ message: "Error fetching study materials", error: err.message });
+  } catch (error) {
+    console.error("Get materials error:", error);
+    res.status(500).json({ message: "Failed to fetch materials" });
   }
 });
 
-// 📝 Get study material by ID
-router.get("/:id", async (req, res) => {
-  try {
-    const material = await StudyMaterial.findById(req.params.id)
-      .populate("uploadedBy", "fullName")
-      .populate("reviews.userId", "fullName");
-
-    if (!material) {
-      return res.status(404).json({ message: "Study material not found" });
-    }
-
-    // Return without incrementing counters here
-
-    res.json({ material });
-  } catch (err) {
-    res.status(500).json({ message: "Error fetching study material", error: err.message });
-  }
-});
-
-// Track a view
-router.post("/:id/view", async (req, res) => {
-  try {
-    const material = await StudyMaterial.findById(req.params.id);
-    if (!material) return res.status(404).json({ message: "Study material not found" });
-    material.views += 1;
-    await material.save();
-    res.json({ views: material.views });
-  } catch (err) {
-    res.status(500).json({ message: "Error tracking view", error: err.message });
-  }
-});
-
-// Track a download
-router.post("/:id/download", async (req, res) => {
-  try {
-    const material = await StudyMaterial.findById(req.params.id);
-    if (!material) return res.status(404).json({ message: "Study material not found" });
-    material.downloads += 1;
-    await material.save();
-    res.json({ downloads: material.downloads });
-  } catch (err) {
-    res.status(500).json({ message: "Error tracking download", error: err.message });
-  }
-});
-
-// 📝 Upload new study material
+// Upload study material
 router.post("/", upload.single("file"), async (req, res) => {
   try {
-    // Check authentication - support both new and legacy session structure
-    const teacherId = (req.session.user?.role === "teacher" && req.session.user.id) || req.session.teacherId;
-    if (!teacherId) {
-      return res.status(401).json({ message: "Not authenticated" });
-    }
-
-    if (!req.file) {
-      return res.status(400).json({ message: "No file uploaded" });
-    }
-
-    const { title, description, subject, grade, tags } = req.body;
-    const fileType = path.extname(req.file.originalname).toLowerCase().substring(1);
-
-    const studyMaterial = new StudyMaterial({
-      title,
-      description,
-      subject,
-      grade,
-      type: fileType,
-      fileUrl: `/uploads/${req.file.filename}`,
-      fileName: req.file.originalname,
-      fileSize: req.file.size,
-      uploadedBy: teacherId,
-      tags: tags ? tags.split(",").map(tag => tag.trim()) : []
-    });
-
-    await studyMaterial.save();
-    
-    // Populate the uploadedBy field for response
-    await studyMaterial.populate('uploadedBy', 'fullName email');
-    
-    res.status(201).json(studyMaterial);
-  } catch (err) {
-    res.status(500).json({ message: "Error uploading study material", error: err.message });
-  }
-});
-
-// 📝 Update study material
-router.put("/:id", async (req, res) => {
-  try {
-    if (!req.session.user?.id) {
-      return res.status(401).json({ message: "Not authenticated" });
-    }
-
-    const material = await StudyMaterial.findById(req.params.id);
-    if (!material) {
-      return res.status(404).json({ message: "Study material not found" });
-    }
-
-    // Check if user is the uploader
-    if (material.uploadedBy.toString() !== req.session.user?.id) {
-      return res.status(403).json({ message: "Not authorized" });
+    if (!req.session.user || req.session.user.role !== "teacher") {
+      return res.status(403).json({ message: "Only teachers can upload materials" });
     }
 
     const { title, description, subject, grade, tags, isPublic } = req.body;
-    
-    material.title = title || material.title;
-    material.description = description || material.description;
-    material.subject = subject || material.subject;
-    material.grade = grade || material.grade;
-    material.tags = tags ? tags.split(",").map(tag => tag.trim()) : material.tags;
-    material.isPublic = isPublic !== undefined ? isPublic : material.isPublic;
+
+    if (!title || !subject || !req.file) {
+      return res.status(400).json({ message: "Title, subject, and file are required" });
+    }
+
+    if (!isMongoDBAvailable()) {
+      return res.status(503).json({ message: "Database not available" });
+    }
+
+    const fileUrl = `/uploads/${req.file.filename}`;
+
+    const material = new StudyMaterial({
+      title,
+      description: description || "",
+      subject,
+      grade: grade || "",
+      type: req.file.mimetype.startsWith("video/") ? "video" : 
+            req.file.mimetype === "application/pdf" ? "pdf" : "notes",
+      fileUrl,
+      fileName: req.file.originalname,
+      fileSize: req.file.size,
+      tags: tags ? tags.split(",").map(t => t.trim()) : [],
+      uploadedBy: req.session.user.id,
+      isPublic: isPublic === "true" || isPublic === true
+    });
 
     await material.save();
-    res.json(material);
-  } catch (err) {
-    res.status(500).json({ message: "Error updating study material", error: err.message });
+    res.status(201).json({ message: "Material uploaded successfully", material });
+  } catch (error) {
+    console.error("Upload error:", error);
+    res.status(500).json({ message: "Upload failed" });
   }
 });
 
-// 📝 Delete study material
-router.delete("/:id", async (req, res) => {
+// Get specific study material
+router.get("/:id", async (req, res) => {
   try {
-    // Check authentication - support both new and legacy session structure
-    const teacherId = (req.session.user?.role === "teacher" && req.session.user.id) || req.session.teacherId;
-    if (!teacherId) {
-      return res.status(401).json({ message: "Not authenticated" });
+    if (!isMongoDBAvailable()) {
+      return res.status(503).json({ message: "Database not available" });
+    }
+
+    const material = await StudyMaterial.findById(req.params.id)
+      .populate("uploadedBy", "fullName email");
+
+    if (!material) {
+      return res.status(404).json({ message: "Material not found" });
+    }
+
+    res.json({ material });
+  } catch (error) {
+    console.error("Get material error:", error);
+    res.status(500).json({ message: "Failed to fetch material" });
+  }
+});
+
+// Update study material
+router.put("/:id", async (req, res) => {
+  try {
+    if (!req.session.user || req.session.user.role !== "teacher") {
+      return res.status(403).json({ message: "Only teachers can update materials" });
+    }
+
+    if (!isMongoDBAvailable()) {
+      return res.status(503).json({ message: "Database not available" });
     }
 
     const material = await StudyMaterial.findById(req.params.id);
     if (!material) {
-      return res.status(404).json({ message: "Study material not found" });
+      return res.status(404).json({ message: "Material not found" });
     }
 
-    // Check if user is the uploader
-    if (material.uploadedBy.toString() !== teacherId) {
-      return res.status(403).json({ message: "Not authorized" });
+    if (material.uploadedBy.toString() !== req.session.user.id) {
+      return res.status(403).json({ message: "You can only update your own materials" });
     }
 
-    // Delete file from filesystem
-    const filePath = path.join(__dirname, "../../", material.fileUrl);
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
+    const updatedMaterial = await StudyMaterial.findByIdAndUpdate(
+      req.params.id,
+      req.body,
+      { new: true, runValidators: true }
+    );
+
+    res.json({ message: "Material updated successfully", material: updatedMaterial });
+  } catch (error) {
+    console.error("Update material error:", error);
+    res.status(500).json({ message: "Failed to update material" });
+  }
+});
+
+// Delete study material
+router.delete("/:id", async (req, res) => {
+  try {
+    if (!req.session.user || req.session.user.role !== "teacher") {
+      return res.status(403).json({ message: "Only teachers can delete materials" });
+    }
+
+    if (!isMongoDBAvailable()) {
+      return res.status(503).json({ message: "Database not available" });
+    }
+
+    const material = await StudyMaterial.findById(req.params.id);
+    if (!material) {
+      return res.status(404).json({ message: "Material not found" });
+    }
+
+    if (material.uploadedBy.toString() !== req.session.user.id) {
+      return res.status(403).json({ message: "You can only delete your own materials" });
     }
 
     await StudyMaterial.findByIdAndDelete(req.params.id);
-    res.json({ message: "Study material deleted successfully" });
-  } catch (err) {
-    res.status(500).json({ message: "Error deleting study material", error: err.message });
+    res.json({ message: "Material deleted successfully" });
+  } catch (error) {
+    console.error("Delete error:", error);
+    res.status(500).json({ message: "Delete failed" });
   }
 });
 
-// 📝 Add review to study material
-router.post("/:id/reviews", async (req, res) => {
+// Track material view
+router.post("/:id/view", async (req, res) => {
   try {
-    if (!req.session.user?.id) {
-      return res.status(401).json({ message: "Not authenticated" });
+    if (!isMongoDBAvailable()) {
+      return res.status(503).json({ message: "Database not available" });
     }
 
-    const { rating, comment } = req.body;
     const material = await StudyMaterial.findById(req.params.id);
-
     if (!material) {
-      return res.status(404).json({ message: "Study material not found" });
+      return res.status(404).json({ message: "Material not found" });
     }
 
-    // Check if user already reviewed
-    const existingReview = material.reviews.find(
-      review => review.userId.toString() === req.session.user?.id
-    );
-
-    if (existingReview) {
-      return res.status(400).json({ message: "You have already reviewed this material" });
-    }
-
-    material.reviews.push({
-      userId: req.session.user?.id,
-      rating,
-      comment
-    });
-
-    // Update average rating
-    const totalRating = material.reviews.reduce((sum, review) => sum + review.rating, 0);
-    material.rating = totalRating / material.reviews.length;
-
+    // Increment view count
+    material.viewCount = (material.viewCount || 0) + 1;
     await material.save();
-    res.json(material);
-  } catch (err) {
-    res.status(500).json({ message: "Error adding review", error: err.message });
+
+    res.json({ message: "View tracked successfully" });
+  } catch (error) {
+    console.error("Track view error:", error);
+    res.status(500).json({ message: "Failed to track view" });
+  }
+});
+
+// Download material
+router.get("/:id/download", async (req, res) => {
+  try {
+    if (!isMongoDBAvailable()) {
+      return res.status(503).json({ message: "Database not available" });
+    }
+
+    const material = await StudyMaterial.findById(req.params.id);
+    if (!material) {
+      return res.status(404).json({ message: "Material not found" });
+    }
+
+    // Increment download count
+    material.downloadCount = (material.downloadCount || 0) + 1;
+    await material.save();
+
+    // Return file URL for download
+    res.json({ 
+      message: "Download initiated",
+      fileUrl: material.fileUrl,
+      fileName: material.fileName
+    });
+  } catch (error) {
+    console.error("Download error:", error);
+    res.status(500).json({ message: "Failed to initiate download" });
+  }
+});
+
+// Get materials by teacher
+router.get("/teacher/:teacherId", async (req, res) => {
+  try {
+    if (!isMongoDBAvailable()) {
+      return res.status(503).json({ message: "Database not available" });
+    }
+
+    const materials = await StudyMaterial.find({ 
+      uploadedBy: req.params.teacherId,
+      isPublic: true 
+    })
+    .populate("uploadedBy", "fullName email")
+    .sort({ createdAt: -1 });
+
+    res.json({ materials });
+  } catch (error) {
+    console.error("Get teacher materials error:", error);
+    res.status(500).json({ message: "Failed to fetch materials" });
+  }
+});
+
+// Get materials by subject
+router.get("/subject/:subject", async (req, res) => {
+  try {
+    if (!isMongoDBAvailable()) {
+      return res.status(503).json({ message: "Database not available" });
+    }
+
+    const materials = await StudyMaterial.find({ 
+      subject: { $regex: req.params.subject, $options: 'i' },
+      isPublic: true 
+    })
+    .populate("uploadedBy", "fullName email")
+    .sort({ createdAt: -1 });
+
+    res.json({ materials });
+  } catch (error) {
+    console.error("Get materials by subject error:", error);
+    res.status(500).json({ message: "Failed to fetch materials" });
+  }
+});
+
+// Get popular materials
+router.get("/popular", async (req, res) => {
+  try {
+    if (!isMongoDBAvailable()) {
+      return res.status(503).json({ message: "Database not available" });
+    }
+
+    const materials = await StudyMaterial.find({ isPublic: true })
+      .populate("uploadedBy", "fullName email")
+      .sort({ viewCount: -1, downloadCount: -1 })
+      .limit(10);
+
+    res.json({ materials });
+  } catch (error) {
+    console.error("Get popular materials error:", error);
+    res.status(500).json({ message: "Failed to fetch popular materials" });
   }
 });
 

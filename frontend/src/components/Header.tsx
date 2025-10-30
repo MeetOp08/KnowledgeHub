@@ -36,11 +36,11 @@ const Header: React.FC<HeaderProps> = ({
   ];
 
   const authTeacherNavItems = [
-    { id: "/teacher-dashboard", label: "Teacher Dashboard" },
+    { id: "/teacher/dashboard", label: "Teacher Dashboard" },
   ];
 
   const authStudentNavItems = [
-    { id: "/student-dashboard", label: "Student Dashboard" },
+    { id: "/student/dashboard", label: "Student Dashboard" },
     { id: "/live-tutoring", label: "Live Tutoring" },
     { id: "/ai-chat", label: "AI Chat" },
     { id: "/study-materials", label: "Study Materials" },

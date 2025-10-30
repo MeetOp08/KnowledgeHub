@@ -1,209 +1,99 @@
 import express from "express";
-import mongoose from "mongoose";
 import cors from "cors";
-import session from "express-session";
-import MongoStore from "connect-mongo";
+import mongoose from "mongoose";
 import dotenv from "dotenv";
 import path from "path";
+import MongoStore from "connect-mongo";
 import { fileURLToPath } from "url";
-import fs from "fs";
+import session from "express-session";
+import multer from "multer";
 
-// Load environment variables
+// Import route modules
+import authRoutes from "./routes/auth.js";
+import studentRoutes from "./routes/student.js";
+import teacherRoutes from "./routes/teacher.js";
+import bookingRoutes from "./routes/booking.js";
+import chatRoutes from "./routes/chat.js";
+import notificationRoutes from "./routes/notifications.js";
+import studyMaterialRoutes from "./routes/studyMaterials.js";
+
+// Load env
 dotenv.config();
-
-// Get current directory for ES modules
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-// Create Express app
 const app = express();
 const PORT = process.env.PORT || 5000;
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Middleware
+// Mongo URI
+const mongoURI = process.env.MONGODB_URI || "mongodb://localhost:27017/knowledgehub";
+
+// 🧠 Connect MongoDB
+mongoose
+  .connect(mongoURI)
+  .then(() => console.log("✅ Connected to MongoDB"))
+  .catch((err) => console.error("❌ MongoDB connection failed:", err.message));
+
+// ✅ CORS (must come before session)
 app.use(
   cors({
-    origin: [
-      process.env.CLIENT_URL || "http://localhost:5173",
-      "http://127.0.0.1:5173",
-      "http://localhost:1239",
-      "http://127.0.0.1:1239",
-    ],
-    credentials: true,
+    origin: "http://localhost:5173", // your frontend
+    credentials: true, // allow cookies
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
 
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+// ✅ JSON Parsing
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
-// Database connection
-const mongoURI = process.env.MONGO_URI || "mongodb://127.0.0.1:27017/knowledgehub";
-let useMongoDB = false;
-
-// Try to connect to MongoDB
-mongoose
-  .connect(mongoURI, { 
-    serverSelectionTimeoutMS: 5000,
-    connectTimeoutMS: 5000,
+// ✅ Sessions (must come after CORS)
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET || "knowledgehub-secret-key",
+    resave: false,
+    saveUninitialized: false,
+    store: MongoStore.create({
+      mongoUrl: mongoURI,
+      collectionName: "sessions",
+    }),
+    cookie: {
+      httpOnly: true,
+      secure: false, // only true on HTTPS (production)
+      sameSite: "lax", // important for localhost cross-origin
+      maxAge: 1000 * 60 * 60 * 24, // 24h
+    },
   })
-  .then(() => {
-    console.log("✅ MongoDB connected successfully");
-    useMongoDB = true;
-  })
-  .catch((err) => {
-    console.log("⚠️  MongoDB not available, using file-based storage");
-    console.log("   To use MongoDB, install it or use MongoDB Atlas");
-    useMongoDB = false;
-  });
+);
 
-// Session configuration
-const sessionConfig = {
-  secret: process.env.SESSION_SECRET || "your-secret-key-change-in-production",
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    httpOnly: true,
-    maxAge: 1000 * 60 * 60 * 24, // 24 hours
-    sameSite: "lax",
-    secure: false,
-  },
-};
-
-// Use MongoDB store if available, otherwise use memory store
-if (useMongoDB) {
-  sessionConfig.store = MongoStore.create({ 
-    mongoUrl: mongoURI, 
-    collectionName: "sessions" 
-  });
-}
-
-app.use(session(sessionConfig));
-
-// File-based database fallback
-const DATA_FILE = path.join(__dirname, "data.json");
-
-// Initialize file-based data if MongoDB is not available
-if (!useMongoDB) {
-  if (!fs.existsSync(DATA_FILE)) {
-    const initialData = {
-      teachers: [],
-      students: [],
-      sessions: {},
-      lastId: { teachers: 0, students: 0 }
-    };
-    fs.writeFileSync(DATA_FILE, JSON.stringify(initialData, null, 2));
-    console.log("📁 Created file-based database");
-  }
-}
-
-// Import and setup routes
-async function setupRoutes() {
-  try {
-    console.log("📦 Importing routes...");
-    
-    const authRoutes = await import("./routes/auth.js");
-    const passwordRoutes = await import("./routes/password.js");
-    const chatRoutes = await import("./routes/chat.js");
-    const teacherRoutes = await import("./routes/teacher.js");
-    const studentRoutes = await import("./routes/student.js");
-    const studyMaterialsRoutes = await import("./routes/studyMaterials.js");
-    const bookingRoutes = await import("./routes/booking.js");
-    const aiRoutes = await import("./routes/ai.js");
-    const notificationRoutes = await import("./routes/notifications.js");
-    
-    console.log("✅ All routes imported successfully");
-    
-    // Setup routes
-    app.use("/api/auth", authRoutes.default);
-    app.use("/api/auth", passwordRoutes.default);
-    app.use("/api/ai", aiRoutes.default);
-    app.use("/api/chat", chatRoutes.default);
-    app.use("/api/teacher", teacherRoutes.default);
-    app.use("/api/student", studentRoutes.default);
-    app.use("/api/booking", bookingRoutes.default);
-    app.use("/api/study-materials", studyMaterialsRoutes.default);
-    app.use("/api/notifications", notificationRoutes.default);
-    
-    console.log("✅ Routes setup complete");
-    
-  } catch (error) {
-    console.error("❌ Error importing routes:", error);
-    process.exit(1);
-  }
-}
-
-// Static file serving for uploaded study materials
+// ✅ Uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, path.join(__dirname, "../uploads")),
+  filename: (req, file, cb) =>
+    cb(null, `file-${Date.now()}-${Math.random().toString(36).slice(2)}.${file.originalname.split(".").pop()}`),
+});
+const upload = multer({ storage });
 app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 
-// Test route
-app.get("/api/message", (req, res) => {
-  res.json({ 
-    message: "Hello from KnowledgeHub backend!", 
-    database: useMongoDB ? "MongoDB" : "File-based",
-    port: PORT,
-    timestamp: new Date().toISOString()
-  });
-});
+// ✅ Routes
+app.use("/api/auth", authRoutes);
+app.use("/api/student", studentRoutes);
+app.use("/api/teacher", teacherRoutes);
+app.use("/api/booking", bookingRoutes);
+app.use("/api/chat", chatRoutes);
+app.use("/api/notifications", notificationRoutes);
+app.use("/api/study-materials", studyMaterialRoutes);
 
-// Health check route
+// ✅ Health Check
 app.get("/api/health", (req, res) => {
   res.json({
     status: "OK",
-    database: useMongoDB ? "MongoDB" : "File-based",
-    port: PORT,
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime()
+    mongo: mongoose.connection.readyState === 1 ? "Connected" : "Disconnected",
   });
 });
 
-// Error handling middleware
-app.use((err, req, res, next) => {
-  console.error("❌ Server error:", err);
-  res.status(500).json({
-    error: "Internal server error",
-    message: process.env.NODE_ENV === 'development' ? err.message : "Something went wrong"
-  });
+// ✅ Start Server
+app.listen(PORT, () => {
+  console.log(`\n🚀 KnowledgeHub Backend running at http://localhost:${PORT}`);
+  console.log("==================================================");
+  console.log(`🌍 Environment: ${process.env.NODE_ENV || "development"}`);
 });
-
-// 404 handler
-app.use((req, res) => {
-  res.status(404).json({
-    error: "Not found",
-    message: `Route ${req.method} ${req.path} not found`
-  });
-});
-
-// Start server
-async function startServer() {
-  try {
-    // Setup routes first
-    await setupRoutes();
-    
-    // Start listening
-    app.listen(PORT, () => {
-      console.log("\n🚀 KnowledgeHub Backend Server Started!");
-      console.log(`📍 Server running at http://localhost:${PORT}`);
-      console.log(`📊 Database: ${useMongoDB ? "MongoDB" : "File-based"}`);
-      console.log(`🌐 CORS enabled for frontend ports: 5173, 1239`);
-      console.log(`📁 Uploads directory: ${path.join(__dirname, "../uploads")}`);
-      console.log("=" .repeat(50));
-    });
-    
-  } catch (error) {
-    console.error("❌ Failed to start server:", error);
-    process.exit(1);
-  }
-}
-
-// Handle uncaught exceptions
-process.on('uncaughtException', (err) => {
-  console.error('❌ Uncaught Exception:', err);
-  process.exit(1);
-});
-
-// Handle unhandled promise rejections
-process.on('unhandledRejection', (err) => {
-  console.error('❌ Unhandled Rejection:', err);
-  process.exit(1);
-});
-
-// Start the server
-startServer();
