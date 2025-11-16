@@ -32,7 +32,7 @@ router.get("/dashboard/data", async (req, res) => {
       return res.status(503).json({ message: "Database not available" });
     }
 
-    const student = await Student.findById(req.session.user.id);
+    const student = await Student.findById(req.session.user.id).select("-password -resetPasswordToken -resetPasswordExpires");
     if (!student) return res.status(404).json({ message: "Student not found" });
 
     const bookings = await Booking.find({ studentId: student._id })
@@ -52,15 +52,7 @@ router.get("/dashboard/data", async (req, res) => {
     };
 
     res.json({
-      student: {
-        id: student._id,
-        fullName: student.fullName,
-        email: student.email,
-        grade: student.grade,
-        school: student.school,
-        subjects: student.subjects,
-        learningGoals: student.learningGoals
-      },
+      student,
       bookings,
       studyMaterials,
       stats
@@ -71,43 +63,33 @@ router.get("/dashboard/data", async (req, res) => {
   }
 });
 
-/* ========================================================
-   🧾 UPDATE PROFILE
-======================================================== */
-// backend/routes/student.js
-router.put('/profile/update', async (req, res) => {
+/* === Profile Update & Fetch === */
+router.get("/profile", async (req, res) => {
   try {
-    if (!req.session.user || req.session.user.role !== "student") {
-      return res.status(401).json({ message: "Not authenticated" });
-    }
-    const studentId = req.session.user.id;
-    const update = req.body;
-    const updatedStudent = await Student.findByIdAndUpdate(studentId, update, { new: true });
+    if (!req.session.user || req.session.user.role !== "student")
+      return res.status(403).json({ message: "Only students can view their profile" });
+    const student = await Student.findById(req.session.user.id).select("-password -resetPasswordToken -resetPasswordExpires");
+    if (!student) return res.status(404).json({ message: "Student not found" });
+    res.json(student);
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch profile" });
+  }
+});
+
+router.put("/profile/update", async (req, res) => {
+  try {
+    if (!req.session.user || req.session.user.role !== "student") return res.status(401).json({ message: "Not authenticated" });
+    const fields = { ...req.body };
+    delete fields.email; delete fields.password; // don’t allow sensitive edits here
+    const updatedStudent = await Student.findByIdAndUpdate(
+      req.session.user.id,
+      fields,
+      { new: true, runValidators: true }
+    );
     if (!updatedStudent) return res.status(404).json({ error: 'Student not found' });
     res.json({ student: updatedStudent });
   } catch (err) {
     res.status(500).json({ error: 'Failed to update profile' });
-  }
-});
-/* ========================================================
-   👤 GET PROFILE
-======================================================== */
-router.get("/profile", async (req, res) => {
-  try {
-    if (!req.session.user || req.session.user.role !== "student") {
-      return res.status(403).json({ message: "Only students can view their profile" });
-    }
-    if (!isMongoDBAvailable()) {
-      return res.status(503).json({ message: "Database not available" });
-    }
-
-    const student = await Student.findById(req.session.user.id).select("-password");
-    if (!student) return res.status(404).json({ message: "Student not found" });
-
-    res.json(student);
-  } catch (error) {
-    console.error("❌ Get profile error:", error);
-    res.status(500).json({ message: "Failed to fetch profile" });
   }
 });
 

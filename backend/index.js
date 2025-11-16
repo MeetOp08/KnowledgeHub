@@ -7,6 +7,7 @@ import MongoStore from "connect-mongo";
 import { fileURLToPath } from "url";
 import session from "express-session";
 import multer from "multer";
+import crypto from "crypto";
 
 // Import route modules
 import authRoutes from "./routes/auth.js";
@@ -24,7 +25,7 @@ const PORT = process.env.PORT || 5000;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Mongo URI
-const mongoURI = process.env.MONGODB_URI || "mongodb://localhost:27017/knowledgehub";
+const mongoURI = process.env.MONGO_URI || "mongodb://localhost:27017/KnowledgeHub";
 
 // 🧠 Connect MongoDB
 mongoose
@@ -46,10 +47,15 @@ app.use(
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
+// ✅ Auto-generate session secret if not provided
+const generateSessionSecret = () => {
+  return crypto.randomBytes(64).toString('hex');
+};
+
 // ✅ Sessions (must come after CORS)
 app.use(
   session({
-    secret: process.env.SESSION_SECRET || "knowledgehub-secret-key",
+    secret: process.env.SESSION_SECRET || generateSessionSecret(),
     resave: false,
     saveUninitialized: false,
     store: MongoStore.create({

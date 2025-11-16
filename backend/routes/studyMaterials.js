@@ -206,7 +206,7 @@ router.post("/:id/view", async (req, res) => {
     }
 
     // Increment view count
-    material.viewCount = (material.viewCount || 0) + 1;
+    material.views = (material.views || 0) + 1;
     await material.save();
 
     res.json({ message: "View tracked successfully" });
@@ -229,7 +229,7 @@ router.get("/:id/download", async (req, res) => {
     }
 
     // Increment download count
-    material.downloadCount = (material.downloadCount || 0) + 1;
+    material.downloads = (material.downloads || 0) + 1;
     await material.save();
 
     // Return file URL for download
@@ -295,7 +295,7 @@ router.get("/popular", async (req, res) => {
 
     const materials = await StudyMaterial.find({ isPublic: true })
       .populate("uploadedBy", "fullName email")
-      .sort({ viewCount: -1, downloadCount: -1 })
+      .sort({ views: -1, downloads: -1 })
       .limit(10);
 
     res.json({ materials });

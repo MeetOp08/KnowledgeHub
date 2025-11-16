@@ -2,18 +2,17 @@ import React, { useEffect, useState } from "react";
 import {
   FaBars,
   FaTimes,
-  FaBook,
   FaUser,
   FaClipboardList,
   FaSignOutAlt,
   FaPlus,
   FaChartLine,
   FaUsers,
-  FaDollarSign,
   FaBell,
   FaHome,
   FaVideo,
   FaFileAlt,
+  FaEdit,
 } from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
 import LiveVideoChat from "./LiveVideoChat";
@@ -23,11 +22,17 @@ interface TeacherProfile {
   id: string;
   fullName: string;
   email: string;
+  phone?: string;
+  gender?: string;
+  birthdate?: string;
+  address?: string;
+  avatarUrl?: string;
   subjects?: string[];
   bio?: string;
   experience?: string;
   qualifications?: string[];
   hourlyRate?: number;
+  availability?: any;
   rating?: number;
   totalSessions?: number;
 }
@@ -104,14 +109,15 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onLogout }) => {
   });
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [showProfileModal, setShowProfileModal] = useState(false);
-  const [profileForm, setProfileForm] = useState({
-    fullName: "",
-    email: "",
+  const [profileForm, setProfileForm] = useState<TeacherProfile>({
+    id: '',
+    fullName: "Teacher User",
+    email: "teacher@example.com",
+    subjects: [],
     bio: "",
     experience: "",
-    subjects: [] as string[],
-    qualifications: [] as string[],
-    hourlyRate: 0,
+    rating: 0,
+    totalSessions: 0,
   });
   const [newSubject, setNewSubject] = useState("");
   const [newQualification, setNewQualification] = useState("");
@@ -274,59 +280,16 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onLogout }) => {
   };
 
   // ---------- Profile Management ----------
-  const openProfileModal = () => {
-    setProfileForm({
-      fullName: dashboard.teacher.fullName,
-      email: dashboard.teacher.email,
-      bio: dashboard.teacher.bio || "",
-      experience: dashboard.teacher.experience || "",
-      subjects: dashboard.teacher.subjects || [],
-      qualifications: dashboard.teacher.qualifications || [],
-      hourlyRate: dashboard.teacher.hourlyRate || 0,
-    });
-    setShowProfileModal(true);
-  };
-
-  const handleUpdateProfile = async () => {
-    if (!profileForm.fullName || !profileForm.email) {
-      alert("Please fill in all required fields");
-      return;
-    }
-
-    try {
-      console.log("📝 Updating profile...");
-      const res = await fetch("/api/teacher/profile", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(profileForm),
-      });
-
-      if (res.ok) {
-        const updatedTeacher = await res.json();
-        console.log("✅ Profile updated:", updatedTeacher);
-        setDashboard(prev => ({
-          ...prev,
-          teacher: { ...prev.teacher, ...updatedTeacher }
-        }));
-        setShowProfileModal(false);
-        alert("Profile updated successfully!");
-      } else {
-        const error = await res.json().catch(() => ({ message: "Update failed" }));
-        console.error("❌ Profile update failed:", error);
-        alert(error.message || "Failed to update profile");
-      }
-    } catch (err) {
-      console.error("❌ Profile update error:", err);
-      alert("Failed to update profile. Please check your connection and try again.");
-    }
-  };
+  // Remove function definitions:
+  // const openProfileModal = ...
+  // const handleUpdateProfile = ...
+  // Also make sure there are no references to these functions in button onClick handlers or elsewhere.
 
   const addSubject = () => {
-    if (newSubject.trim() && !profileForm.subjects.includes(newSubject.trim())) {
+    if (newSubject.trim() && !profileForm.subjects?.includes(newSubject.trim())) {
       setProfileForm(prev => ({
         ...prev,
-        subjects: [...prev.subjects, newSubject.trim()]
+        subjects: [...(prev.subjects || []), newSubject.trim()]
       }));
       setNewSubject("");
     }
@@ -335,15 +298,15 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onLogout }) => {
   const removeSubject = (subject: string) => {
     setProfileForm(prev => ({
       ...prev,
-      subjects: prev.subjects.filter(s => s !== subject)
+      subjects: prev.subjects?.filter(s => s !== subject) || []
     }));
   };
 
   const addQualification = () => {
-    if (newQualification.trim() && !profileForm.qualifications.includes(newQualification.trim())) {
+    if (newQualification.trim() && !profileForm.qualifications?.includes(newQualification.trim())) {
       setProfileForm(prev => ({
         ...prev,
-        qualifications: [...prev.qualifications, newQualification.trim()]
+        qualifications: [...(prev.qualifications || []), newQualification.trim()]
       }));
       setNewQualification("");
     }
@@ -352,8 +315,8 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onLogout }) => {
   const removeQualification = (qualification: string) => {
     setProfileForm(prev => ({
       ...prev,
-      qualifications: prev.qualifications.filter(q => q !== qualification)
-    }));
+      qualifications: prev.qualifications?.filter(q => q !== qualification) || [] 
+  }));
   };
 
   // ---------- Booking Management Functions ----------
@@ -719,91 +682,51 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onLogout }) => {
         );
 
       case "profile":
+        // Profile view section
         return (
-          <div className="space-y-6">
-            <div className="flex justify-between items-center">
+          <div className="max-w-3xl mx-auto bg-white shadow rounded-xl p-8 mt-6 flex flex-col gap-8">
+            <div className="flex md:flex-row flex-col gap-7 items-start md:items-center">
               <div>
-                <h3 className="text-2xl font-bold text-gray-900">Profile Management</h3>
-                <p className="text-gray-600">Update your teaching profile and personal information</p>
+                {dashboard.teacher.avatarUrl ? (
+                  <img src={dashboard.teacher.avatarUrl} alt="Avatar" className="w-32 h-32 rounded-full object-cover border" />
+                ) : (
+                  <div className="w-32 h-32 rounded-full bg-purple-100 flex items-center justify-center text-5xl text-purple-500 font-bold">
+                    {dashboard.teacher.fullName ? dashboard.teacher.fullName[0] : "T"}
+                  </div>
+                )}
               </div>
-              <button
-                onClick={openProfileModal}
-                className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2"
-              >
-                <FaUser />
-                Edit Profile
-              </button>
+              <div className="flex-1 ">
+                <h2 className="text-3xl font-bold text-gray-800">{dashboard.teacher.fullName}</h2>
+                <p className="text-gray-500 text-sm mt-1 mb-3">{dashboard.teacher.email}</p>
+                {!!dashboard.teacher.phone && <p className="text-gray-600 mb-1"><span className="font-medium">Phone:</span> {dashboard.teacher.phone}</p>}
+                {!!dashboard.teacher.gender && <p className="text-gray-600 mb-1"><span className="font-medium">Gender:</span> {dashboard.teacher.gender}</p>}
+                {!!dashboard.teacher.birthdate && <p className="text-gray-600 mb-1"><span className="font-medium">Birthdate:</span> {dashboard.teacher.birthdate}</p>}
+                {!!dashboard.teacher.address && <p className="text-gray-600 mb-1"><span className="font-medium">Address:</span> {dashboard.teacher.address}</p>}
+                <button onClick={() => setShowProfileModal(true)} className="mt-4 px-5 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700"><FaEdit className="inline mr-2"/>Edit Profile</button>
+              </div>
             </div>
-
-            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <h4 className="text-lg font-semibold text-gray-900 mb-4">Personal Information</h4>
-                  <div className="space-y-3">
-                    <div>
-                      <label className="text-sm font-medium text-gray-600">Full Name</label>
-                      <p className="text-gray-900">{teacher.fullName}</p>
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium text-gray-600">Email</label>
-                      <p className="text-gray-900">{teacher.email}</p>
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium text-gray-600">Bio</label>
-                      <p className="text-gray-900">{teacher.bio || "No bio provided"}</p>
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium text-gray-600">Experience</label>
-                      <p className="text-gray-900">{teacher.experience || "No experience provided"}</p>
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium text-gray-600">Hourly Rate</label>
-                      <p className="text-gray-900">₹{teacher.hourlyRate || 0}/hour</p>
-                    </div>
-                  </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mt-4">
+              <div>
+                <h4 className="font-semibold text-lg mb-2 text-gray-800">Bio</h4>
+                <p className="text-gray-700 min-h-[48px]">{dashboard.teacher.bio || 'N/A'}</p>
+                <h4 className="font-semibold text-lg mt-6 mb-2 text-gray-800">Experience</h4>
+                <p className="text-gray-700 min-h-[48px]">{dashboard.teacher.experience || 'N/A'}</p>
+              </div>
+              <div>
+                <h4 className="font-semibold text-lg mb-2 text-gray-800">Subjects</h4>
+                <div className="flex flex-wrap gap-2">
+                  {dashboard.teacher.subjects?.length ? dashboard.teacher.subjects.map((s, idx) => (
+                    <span key={idx} className="px-3 py-1 bg-blue-100 text-blue-700 rounded-lg text-sm">{s}</span>
+                  )) : <span className="text-gray-500">N/A</span>}
                 </div>
-
-                <div>
-                  <h4 className="text-lg font-semibold text-gray-900 mb-4">Teaching Details</h4>
-                  <div className="space-y-3">
-                    <div>
-                      <label className="text-sm font-medium text-gray-600">Subjects</label>
-                      <div className="flex flex-wrap gap-2 mt-1">
-                        {teacher.subjects && teacher.subjects.length > 0 ? (
-                          teacher.subjects.map((subject, index) => (
-                            <span key={index} className="px-2 py-1 bg-blue-100 text-blue-600 text-sm rounded">
-                              {subject}
-                            </span>
-                          ))
-                        ) : (
-                          <p className="text-gray-500 text-sm">No subjects added</p>
-                        )}
-                      </div>
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium text-gray-600">Qualifications</label>
-                      <div className="flex flex-wrap gap-2 mt-1">
-                        {teacher.qualifications && teacher.qualifications.length > 0 ? (
-                          teacher.qualifications.map((qual, index) => (
-                            <span key={index} className="px-2 py-1 bg-green-100 text-green-600 text-sm rounded">
-                              {qual}
-                            </span>
-                          ))
-                        ) : (
-                          <p className="text-gray-500 text-sm">No qualifications added</p>
-                        )}
-                      </div>
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium text-gray-600">Rating</label>
-                      <p className="text-gray-900">{teacher.rating || 0}/5 ⭐</p>
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium text-gray-600">Total Sessions</label>
-                      <p className="text-gray-900">{teacher.totalSessions || 0}</p>
-                    </div>
-                  </div>
+                <h4 className="font-semibold text-lg mt-6 mb-2 text-gray-800">Qualifications</h4>
+                <div className="flex flex-wrap gap-2">
+                  {dashboard.teacher.qualifications?.length ? dashboard.teacher.qualifications.map((q, idx) => (
+                    <span key={idx} className="px-3 py-1 bg-green-100 text-green-700 rounded-lg text-sm">{q}</span>
+                  )) : <span className="text-gray-500">N/A</span>}
                 </div>
+                <h4 className="font-semibold text-lg mt-6 mb-2 text-gray-800">Hourly Rate</h4>
+                <p className="text-gray-700">{dashboard.teacher.hourlyRate ? `₹${dashboard.teacher.hourlyRate}/hr` : 'N/A'}</p>
               </div>
             </div>
           </div>
@@ -1185,45 +1108,90 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onLogout }) => {
               }
             }}>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Personal Info */}
-                <div>
-                  <label className="block text-gray-500 mb-1">Full Name *</label>
-                  <input type="text" className="w-full border rounded p-2 mb-3" value={profileForm.fullName} onChange={e => setProfileForm(f => ({ ...f, fullName: e.target.value }))} required />
-                  <label className="block text-gray-500 mb-1">Email *</label>
-                  <input type="email" className="w-full border rounded p-2 mb-3" value={profileForm.email} onChange={e => setProfileForm(f => ({ ...f, email: e.target.value }))} required />
-                  <label className="block text-gray-500 mb-1">Bio</label>
-                  <textarea className="w-full border rounded p-2 mb-3" rows={3} value={profileForm.bio} onChange={e => setProfileForm(f => ({ ...f, bio: e.target.value }))} />
-                  <label className="block text-gray-500 mb-1">Experience</label>
-                  <textarea className="w-full border rounded p-2 mb-3" rows={2} value={profileForm.experience} onChange={e => setProfileForm(f => ({ ...f, experience: e.target.value }))} />
-                  <label className="block text-gray-500 mb-1">Hourly Rate (₹)</label>
-                  <input type="number" className="w-full border rounded p-2" value={profileForm.hourlyRate} onChange={e => setProfileForm(f => ({ ...f, hourlyRate: Number(e.target.value) }))} />
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-gray-500 mb-1">Full Name *</label>
+                    <input type="text" className="w-full border rounded p-2" value={profileForm.fullName} onChange={e => setProfileForm(f => ({ ...f, fullName: e.target.value }))} required />
+                  </div>
+                  <div>
+                    <label className="block text-gray-500 mb-1">Email *</label>
+                    <input type="email" className="w-full border rounded p-2" value={profileForm.email} onChange={e => setProfileForm(f => ({ ...f, email: e.target.value }))} required />
+                  </div>
+                  <div>
+                    <label className="block text-gray-500 mb-1">Phone</label>
+                    <input type="text" className="w-full border rounded p-2" value={profileForm.phone || ""} onChange={e => setProfileForm(f => ({ ...f, phone: e.target.value }))} />
+                  </div>
+                  <div className="flex gap-2">
+                    <div className="flex-1">
+                      <label className="block text-gray-500 mb-1">Gender</label>
+                      <select className="w-full border rounded p-2" value={profileForm.gender || ""} onChange={e => setProfileForm(f => ({ ...f, gender: e.target.value }))}>
+                        <option value="">Select</option>
+                        <option value="male">Male</option>
+                        <option value="female">Female</option>
+                        <option value="other">Other</option>
+                      </select>
+                    </div>
+                    <div className="flex-1">
+                      <label className="block text-gray-500 mb-1">Birthdate</label>
+                      <input type="date" className="w-full border rounded p-2" value={profileForm.birthdate || ""} onChange={e => setProfileForm(f => ({ ...f, birthdate: e.target.value }))} />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-gray-500 mb-1">Address</label>
+                    <input type="text" className="w-full border rounded p-2" value={profileForm.address || ""} onChange={e => setProfileForm(f => ({ ...f, address: e.target.value }))} />
+                  </div>
+                  <div className="flex items-center gap-4 my-2">
+                    <div className="flex-1">
+                      <label className="block text-gray-500 mb-1">Photo URL</label>
+                      <input type="text" className="w-full border rounded p-2" value={profileForm.avatarUrl || ""} onChange={e => setProfileForm(f => ({ ...f, avatarUrl: e.target.value }))} placeholder="Paste image URL here" />
+                    </div>
+                    {profileForm.avatarUrl && (
+                      <img src={profileForm.avatarUrl} alt="avatar" className="w-10 h-10 rounded-full border" />
+                    )}
+                  </div>
                 </div>
-                {/* Teaching Details */}
-                <div>
-                  <label className="block text-gray-500 mb-1">Subjects</label>
-                  <div className="flex flex-wrap gap-2 mb-2">
-                    {profileForm.subjects.map((subject, idx) => (
-                      <span key={idx} className="px-3 py-1 bg-blue-100 text-blue-600 rounded-lg flex items-center gap-2">
-                        {subject}
-                        <button type="button" className="ml-1 text-xs" onClick={() => removeSubject(subject)}>&times;</button>
-                      </span>
-                    ))}
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-gray-500 mb-1">Bio</label>
+                    <textarea className="w-full border rounded p-2" rows={2} value={profileForm.bio || ""} onChange={e => setProfileForm(f => ({ ...f, bio: e.target.value }))} />
                   </div>
-                  <input type="text" className="w-full border rounded p-2 mb-3" placeholder="Add subject and press Enter" value={newSubject} onChange={e => setNewSubject(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addSubject(); } }}/>
-                  <label className="block text-gray-500 mb-1">Qualifications</label>
-                  <div className="flex flex-wrap gap-2 mb-2">
-                    {profileForm.qualifications.map((qual, idx) => (
-                      <span key={idx} className="px-3 py-1 bg-green-100 text-green-600 rounded-lg flex items-center gap-2">
-                        {qual}
-                        <button type="button" className="ml-1 text-xs" onClick={() => removeQualification(qual)}>&times;</button>
-                      </span>
-                    ))}
+                  <div>
+                    <label className="block text-gray-500 mb-1">Experience</label>
+                    <textarea className="w-full border rounded p-2" rows={2} value={profileForm.experience || ""} onChange={e => setProfileForm(f => ({ ...f, experience: e.target.value }))} />
                   </div>
-                  <input type="text" className="w-full border rounded p-2 mb-3" placeholder="Add qualification and press Enter" value={newQualification} onChange={e => setNewQualification(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addQualification(); } }}/>
+                  <div>
+                    <label className="block text-gray-500 mb-1">Hourly Rate (₹)</label>
+                    <input type="number" className="w-full border rounded p-2" value={profileForm.hourlyRate || 0} onChange={e => setProfileForm(f => ({ ...f, hourlyRate: Number(e.target.value) }))} />
+                  </div>
+                  <div>
+                    <label className="block text-gray-500 mb-1">Subjects</label>
+                    <div className="flex flex-wrap gap-2 mb-2">
+                      {profileForm.subjects?.map((subject, idx) => (
+                        <span key={idx} className="px-3 py-1 bg-blue-100 text-blue-600 rounded-lg flex items-center gap-2">
+                          {subject}
+                          <button type="button" className="ml-1 text-xs" onClick={() => removeSubject(subject)}>&times;</button>
+                        </span>
+                      ))}
+                    </div>
+                    <input type="text" className="w-full border rounded p-2 mb-3" placeholder="Add subject and press Enter" value={newSubject} onChange={e => setNewSubject(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addSubject(); } }}/>
+                  </div>
+                  <div>
+                    <label className="block text-gray-500 mb-1">Qualifications</label>
+                    <div className="flex flex-wrap gap-2 mb-2">
+                      {profileForm.qualifications?.map((qual, idx) => (
+                        <span key={idx} className="px-3 py-1 bg-green-100 text-green-600 rounded-lg flex items-center gap-2">
+                          {qual}
+                          <button type="button" className="ml-1 text-xs" onClick={() => removeQualification(qual)}>&times;</button>
+                        </span>
+                      ))}
+                    </div>
+                    <input type="text" className="w-full border rounded p-2 mb-3" placeholder="Add qualification and press Enter" value={newQualification} onChange={e => setNewQualification(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addQualification(); } }}/>
+                  </div>
+                  {/* Availability editor could go here in the future */}
                 </div>
               </div>
               {error && <div className="text-red-600 text-sm mt-3">{error}</div>}
-              <div className="flex gap-4 mt-8">
+              <div className="flex gap-4 mt-8 sticky bottom-0 bg-white py-4 z-10">
                 <button type="submit" className="flex-1 bg-purple-600 text-white py-2 rounded-lg hover:bg-purple-700 focus:outline-none disabled:opacity-70" disabled={loading}>
                   {loading ? "Saving..." : "Save Changes"}
                 </button>

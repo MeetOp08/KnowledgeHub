@@ -37,7 +37,7 @@ router.get("/dashboard/data", async (req, res) => {
     }
 
     console.log("🔍 Looking for teacher with ID:", req.session.user.id);
-    const teacher = await Teacher.findById(req.session.user.id);
+    const teacher = await Teacher.findById(req.session.user.id).select("-password -resetPasswordToken -resetPasswordExpires");
     if (!teacher) {
       console.log("❌ Teacher not found in database");
       return res.status(404).json({ message: "Teacher not found" });
@@ -64,18 +64,7 @@ router.get("/dashboard/data", async (req, res) => {
     };
 
     const responseData = {
-      teacher: {
-        id: teacher._id,
-        fullName: teacher.fullName,
-        email: teacher.email,
-        subjects: teacher.subjects,
-        bio: teacher.bio,
-        experience: teacher.experience,
-        qualifications: teacher.qualifications,
-        hourlyRate: teacher.hourlyRate,
-        rating: stats.averageRating,
-        totalSessions: stats.completedSessions
-      },
+      teacher,
       bookings,
       studyMaterials,
       stats
@@ -90,55 +79,33 @@ router.get("/dashboard/data", async (req, res) => {
   }
 });
 
-// Update teacher profile
-router.put("/profile", async (req, res) => {
+// === Profile routes ===
+router.get("/profile", async (req, res) => {
   try {
-    if (!req.session.user || req.session.user.role !== "teacher") {
-      return res.status(403).json({ message: "Only teachers can update their profile" });
-    }
-
-    if (!isMongoDBAvailable()) {
-      return res.status(503).json({ message: "Database not available" });
-    }
-
-    const teacher = await Teacher.findByIdAndUpdate(
-      req.session.user.id,
-      req.body,
-      { new: true, runValidators: true }
-    );
-
-    if (!teacher) {
-      return res.status(404).json({ message: "Teacher not found" });
-    }
-
+    if (!req.session.user || req.session.user.role !== "teacher")
+      return res.status(403).json({ message: "Only teachers can view their profile" });
+    const teacher = await Teacher.findById(req.session.user.id).select("-password -resetPasswordToken -resetPasswordExpires");
+    if (!teacher) return res.status(404).json({ message: "Teacher not found" });
     res.json(teacher);
   } catch (error) {
-    console.error("Profile update error:", error);
-    res.status(500).json({ message: "Failed to update profile" });
+    res.status(500).json({ message: "Failed to fetch profile" });
   }
 });
 
-// Get teacher profile
-router.get("/profile", async (req, res) => {
+router.put("/profile", async (req, res) => {
   try {
-    if (!req.session.user || req.session.user.role !== "teacher") {
-      return res.status(403).json({ message: "Only teachers can view their profile" });
-    }
-
-    if (!isMongoDBAvailable()) {
-      return res.status(503).json({ message: "Database not available" });
-    }
-
-    const teacher = await Teacher.findById(req.session.user.id).select("-password");
-    
-    if (!teacher) {
-      return res.status(404).json({ message: "Teacher not found" });
-    }
-
-    res.json(teacher);
-  } catch (error) {
-    console.error("Get profile error:", error);
-    res.status(500).json({ message: "Failed to fetch profile" });
+    if (!req.session.user || req.session.user.role !== "teacher") return res.status(403).json({ message: "Only teachers" });
+    const fields = { ...req.body };
+    delete fields.email; delete fields.password;
+    const updatedTeacher = await Teacher.findByIdAndUpdate(
+      req.session.user.id,
+      fields,
+      { new: true, runValidators: true }
+    );
+    if (!updatedTeacher) return res.status(404).json({ error: 'Teacher not found' });
+    res.json(updatedTeacher);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update profile' });
   }
 });
 

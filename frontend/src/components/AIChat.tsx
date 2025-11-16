@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import {
-  Send, Bot, User, BookOpen, Calculator, Lightbulb, Clock, ArrowLeft, Plus, MessageSquare
+  Send, Bot, User, BookOpen, Calculator, Lightbulb, Clock, ArrowLeft, Plus, MessageSquare, Trash2, AlertCircle
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
@@ -32,9 +32,13 @@ const AIChat: React.FC = () => {
   const navigate = useNavigate();
 
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [userId, setUserId] = useState<string>("student123");
+  const [userId, setUserId] = useState<string | null>(null);
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [aiServiceConfigured, setAiServiceConfigured] = useState<boolean | null>(null);
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
+  const [errorDetails, setErrorDetails] = useState<string | null>(null);
+  const [showErrorDetails, setShowErrorDetails] = useState(false);
 
   const quickActions = [
     { icon: Calculator, text: "Solve Math Problem", color: "from-blue-500 to-blue-600" },
@@ -53,6 +57,7 @@ const AIChat: React.FC = () => {
 
   // Load chat sessions
   const loadChatSessions = async () => {
+    if (!userId) return;
     try {
       const res = await fetch(`${API_BASE_URL}/api/chat/sessions/${userId}`, {
         credentials: 'include'
@@ -70,6 +75,7 @@ const AIChat: React.FC = () => {
 
   // Load specific chat session
   const loadChatSession = async (sessionIdToLoad: string) => {
+    if (!userId) return;
     try {
       const res = await fetch(`${API_BASE_URL}/api/chat/history/${sessionIdToLoad}?userId=${userId}`, {
         credentials: 'include'
@@ -110,7 +116,13 @@ const AIChat: React.FC = () => {
         const res = await fetch(`${API_BASE_URL}/api/auth/me`, { credentials: 'include' });
         if (res.ok) {
           const userData = await res.json();
-          const fetchedUserId = userData.user?.id || `user_${Date.now()}`;
+          // Try to get userId from different possible locations
+          const fetchedUserId = userData.user?.id || 
+                               userData.user?._id || 
+                               userData.user?.userId ||
+                               userData.id ||
+                               (userData.user && userData.user.toString()) ||
+                               `user_${Date.now()}`;
           setUserId(fetchedUserId);
 
           // Load chat sessions
@@ -125,18 +137,67 @@ const AIChat: React.FC = () => {
           setSessionId(storedSession);
 
           // Load current session history if it exists
-          await loadChatSession(storedSession);
+          if (fetchedUserId) {
+            await loadChatSession(storedSession);
+          }
+        } else {
+          // If not authenticated, try to get from student dashboard data
+          try {
+            const dashboardRes = await fetch(`${API_BASE_URL}/api/student/dashboard/data`, {
+              credentials: 'include',
+            });
+            if (dashboardRes.ok) {
+              const dashboardData = await dashboardRes.json();
+              const fetchedUserId = dashboardData.student?.id || 
+                                   dashboardData.student?._id ||
+                                   `student_${Date.now()}`;
+              setUserId(fetchedUserId);
+              
+              // Initialize session
+              let storedSession = localStorage.getItem("chatSessionId");
+              if (!storedSession) {
+                storedSession = crypto.randomUUID();
+                localStorage.setItem("chatSessionId", storedSession);
+              }
+              setSessionId(storedSession);
+              
+              if (fetchedUserId) {
+                await loadChatSessions();
+                await loadChatSession(storedSession);
+              }
+            }
+          } catch (err) {
+            console.error("Error fetching dashboard data:", err);
+            // Fallback to a default userId if all fails
+            const fallbackId = `student_${Date.now()}`;
+            setUserId(fallbackId);
+          }
         }
       } catch (err) {
         console.error("Error fetching user info:", err);
+        // Fallback to a default userId
+        const fallbackId = `student_${Date.now()}`;
+        setUserId(fallbackId);
       }
     };
 
     initializeChat();
   }, []);
 
+  // Check AI service status when component mounts and userId is available
+  useEffect(() => {
+    if (userId) {
+      checkAIServiceStatus();
+    }
+  }, [userId]);
+
   const sendMessage = async () => {
-    if (!inputMessage.trim() || !sessionId) return;
+    if (!inputMessage.trim() || !sessionId || !userId) {
+      if (!userId) {
+        alert("User not authenticated. Please refresh the page.");
+      }
+      return;
+    }
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -157,24 +218,68 @@ const AIChat: React.FC = () => {
         body: JSON.stringify({ message: userMessage.content, userId, sessionId }),
       });
 
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ message: "Unknown error" }));
+        
+        console.error("❌ API Response Error:", {
+          status: res.status,
+          statusText: res.statusText,
+          error: errorData
+        });
+        
+        // Check if AI service is not configured
+        if (res.status === 503 && errorData.message?.includes("AI service not configured")) {
+          setAiServiceConfigured(false);
+          setErrorDetails(`Status: ${res.status}\nMessage: ${errorData.message}\nError: ${errorData.error || "N/A"}`);
+          throw new Error(errorData.message || "AI service is not configured");
+        }
+        
+        // Store error details for display
+        setErrorDetails(`Status: ${res.status} ${res.statusText}\nMessage: ${errorData.message || "Unknown error"}\nError Type: ${errorData.errorType || "N/A"}\nError: ${errorData.error || "N/A"}`);
+        
+        throw new Error(errorData.message || `HTTP ${res.status}: ${res.statusText}`);
+      }
+
       const data = await res.json();
 
       const aiResponse: Message = {
         id: (Date.now() + 1).toString(),
         type: "ai",
-        content: data.reply || "⚠️ AI didn't respond.",
+        content: data.reply || data.message || "⚠️ AI didn't respond.",
         timestamp: new Date(),
       };
 
       setMessages((prev) => [...prev, aiResponse]);
       
+      // Update session ID if returned from server
+      if (data.sessionId) {
+        setSessionId(data.sessionId);
+        localStorage.setItem("chatSessionId", data.sessionId);
+      }
+      
       // Refresh chat sessions to update the list
       loadChatSessions();
-    } catch (err) {
-      console.error("Chat error:", err);
+    } catch (err: any) {
+      console.error("❌ AIChat Error:", err);
+      console.error("   - Error Type:", err.constructor?.name || "Unknown");
+      console.error("   - Error Message:", err.message);
+      console.error("   - Error Stack:", err.stack);
+      console.error("   - Full Error Object:", err);
+      
+      const errorMessage = err.message || "Something went wrong. Please try again later.";
+      const detailedError = err.response?.error || err.error || err.message || "Unknown error";
+      
+      setErrorDetails(detailedError);
+      setAiServiceConfigured(false);
+      
       setMessages((prev) => [
         ...prev,
-        { id: (Date.now() + 2).toString(), type: "ai", content: "⚠️ Something went wrong. Try again later.", timestamp: new Date() },
+        { 
+          id: (Date.now() + 2).toString(), 
+          type: "ai", 
+          content: `⚠️ Error: ${errorMessage}`, 
+          timestamp: new Date() 
+        },
       ]);
     } finally {
       setIsTyping(false);
@@ -183,6 +288,100 @@ const AIChat: React.FC = () => {
 
   const handleQuickAction = (text: string) => {
     setInputMessage(text);
+  };
+
+  // Delete chat session
+  const deleteChatSession = async (sessionIdToDelete: string, e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent loading the session when clicking delete
+    
+    if (!userId || !window.confirm("Are you sure you want to delete this chat?")) {
+      return;
+    }
+
+    setDeletingSessionId(sessionIdToDelete);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/chat/session/${sessionIdToDelete}?userId=${userId}`, {
+        method: "DELETE",
+        credentials: 'include'
+      });
+
+      if (res.ok) {
+        // Remove from local state
+        setChatSessions(prev => prev.filter(s => s.sessionId !== sessionIdToDelete));
+        
+        // If deleted session was the current one, create new chat
+        if (sessionId === sessionIdToDelete) {
+          createNewChat();
+        }
+      } else {
+        const errorData = await res.json().catch(() => ({ message: "Failed to delete chat" }));
+        alert(`Error: ${errorData.message || "Failed to delete chat session"}`);
+      }
+    } catch (err) {
+      console.error("Error deleting chat session:", err);
+      alert("Error deleting chat session. Please try again.");
+    } finally {
+      setDeletingSessionId(null);
+    }
+  };
+
+  // Check AI service status
+  const checkAIServiceStatus = async () => {
+    try {
+      console.log("🔍 Checking AI service status...");
+      // Try a test request to check if AI service is configured
+      // We'll catch the error response without creating a session
+      const testRes = await fetch(`${API_BASE_URL}/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: 'include',
+        body: JSON.stringify({ 
+          message: "", // Empty message will trigger validation error, not AI call
+          userId: userId || "test-check",
+          sessionId: null
+        }),
+      });
+
+      const testData = await testRes.json().catch(() => ({}));
+      
+      console.log("🔍 AI Service Check Response:", {
+        status: testRes.status,
+        data: testData
+      });
+      
+      // If we get 503 with AI service not configured message, service is down
+      if (testRes.status === 503 && testData.message?.includes("AI service not configured")) {
+        console.error("❌ AI Service Not Configured");
+        setAiServiceConfigured(false);
+        setErrorDetails(`Status: ${testRes.status}\nMessage: ${testData.message || "AI service not configured"}`);
+      } else if (testRes.status === 400 && testData.message?.includes("Message")) {
+        // If we get validation error (400), it means the endpoint is reachable
+        // We need to actually check by trying with a real message but catching early
+        // For now, assume it's configured if we don't get the 503 error
+        console.log("✅ AI Service appears to be configured");
+        setAiServiceConfigured(true);
+        setErrorDetails(null);
+      } else {
+        // Any other response suggests service might be available
+        console.log("✅ AI Service appears to be available");
+        setAiServiceConfigured(true);
+        setErrorDetails(null);
+      }
+    } catch (err: any) {
+      console.error("❌ AI Service Check Error:", err);
+      console.error("   - Error Message:", err.message);
+      console.error("   - Error Type:", err.constructor?.name || "Unknown");
+      
+      // Network errors or 503 status likely means service not configured
+      if (err.message?.includes("503") || err.message?.includes("not configured")) {
+        setAiServiceConfigured(false);
+        setErrorDetails(`Network/Service Error: ${err.message || "Could not reach AI service"}`);
+      } else {
+        // Assume configured on other errors (could be network issue)
+        setAiServiceConfigured(null);
+        setErrorDetails(null);
+      }
+    }
   };
 
   return (
@@ -210,28 +409,46 @@ const AIChat: React.FC = () => {
         
         <div className="flex-1 overflow-y-auto p-2">
           {chatSessions.map((session) => (
-            <button
+            <div
               key={session.sessionId}
-              onClick={() => loadChatSession(session.sessionId)}
-              className={`w-full text-left p-3 rounded-lg mb-2 transition-colors ${
+              className={`relative group w-full text-left p-3 rounded-lg mb-2 transition-colors border ${
                 sessionId === session.sessionId 
                   ? 'bg-blue-100 border-blue-500 border-2' 
-                  : 'hover:bg-gray-100 border border-gray-200'
+                  : 'hover:bg-gray-100 border-gray-200'
               }`}
             >
-              <div className="flex items-start gap-2">
-                <MessageSquare className="h-4 w-4 mt-1 text-gray-500 flex-shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-sm text-gray-900 truncate">{session.title}</p>
-                  <p className="text-xs text-gray-500 mt-1">
-                    {session.messageCount} messages
-                  </p>
-                  <p className="text-xs text-gray-400 mt-1">
-                    {new Date(session.updatedAt).toLocaleDateString()} {new Date(session.updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                  </p>
+              <button
+                onClick={() => loadChatSession(session.sessionId)}
+                className="w-full text-left"
+              >
+                <div className="flex items-start gap-2 pr-6">
+                  <MessageSquare className="h-4 w-4 mt-1 text-gray-500 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-sm text-gray-900 truncate">{session.title}</p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      {session.messageCount} messages
+                    </p>
+                    <p className="text-xs text-gray-400 mt-1">
+                      {new Date(session.updatedAt).toLocaleDateString()} {new Date(session.updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    </p>
+                  </div>
                 </div>
-              </div>
-            </button>
+              </button>
+              <button
+                onClick={(e) => deleteChatSession(session.sessionId, e)}
+                disabled={deletingSessionId === session.sessionId}
+                className={`absolute top-2 right-2 p-1.5 rounded hover:bg-red-100 text-gray-400 hover:text-red-600 transition-colors ${
+                  deletingSessionId === session.sessionId ? 'opacity-50 cursor-not-allowed' : ''
+                }`}
+                title="Delete chat"
+              >
+                {deletingSessionId === session.sessionId ? (
+                  <div className="w-4 h-4 border-2 border-red-500 border-t-transparent rounded-full animate-spin"></div>
+                ) : (
+                  <Trash2 className="h-4 w-4" />
+                )}
+              </button>
+            </div>
           ))}
           {chatSessions.length === 0 && (
             <div className="text-center py-8 text-gray-500 text-sm">
@@ -266,8 +483,24 @@ const AIChat: React.FC = () => {
             <div className="text-center">
               <h1 className="text-4xl font-bold text-gray-900 mb-3">🤖 AI Study Assistant</h1>
               <p className="text-lg text-gray-600 max-w-2xl mx-auto">
-                Get instant help with your studies, solve problems, and learn better with our AI-powered assistant
+                Powered by OpenAI GPT • Get instant help with your studies, solve problems, and learn better with our AI-powered assistant
               </p>
+              {aiServiceConfigured === false ? (
+                <div className="mt-3 inline-flex items-center gap-2 px-4 py-2 bg-red-100 text-red-700 rounded-full text-sm border border-red-300">
+                  <AlertCircle className="h-4 w-4" />
+                  AI Service Not Configured
+                </div>
+              ) : aiServiceConfigured === true ? (
+                <div className="mt-2 inline-flex items-center gap-2 px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm">
+                  <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                  AI Ready
+                </div>
+              ) : (
+                <div className="mt-2 inline-flex items-center gap-2 px-3 py-1 bg-yellow-100 text-yellow-700 rounded-full text-sm">
+                  <span className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse"></span>
+                  Checking Status...
+                </div>
+              )}
             </div>
           </div>
 
@@ -291,6 +524,49 @@ const AIChat: React.FC = () => {
 
           {/* Messages */}
           <div className="h-[500px] overflow-y-auto p-6 space-y-6 bg-gray-50">
+            {aiServiceConfigured === false && (
+              <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <h4 className="font-semibold text-red-900 mb-1">AI Service Not Configured</h4>
+                    <p className="text-sm text-red-700">
+                      The AI service is not available. Please ensure that either OPENAI_API_KEY or GROQ_API_KEY is set in the backend .env file.
+                    </p>
+                    {errorDetails && (
+                      <>
+                        <button
+                          onClick={() => setShowErrorDetails(!showErrorDetails)}
+                          className="text-xs text-red-600 hover:text-red-800 underline mt-2 flex items-center gap-1"
+                        >
+                          {showErrorDetails ? "▼ Hide" : "▶ Show"} Error Details
+                          <span className="text-red-400">(Check browser console for full details)</span>
+                        </button>
+                        {showErrorDetails && (
+                          <div className="mt-2 p-3 bg-red-100 rounded border border-red-300">
+                            <div className="text-xs text-red-800 font-mono whitespace-pre-wrap break-words">
+                              {errorDetails}
+                            </div>
+                            <p className="text-xs text-red-600 mt-2">
+                              💡 Tip: Open browser DevTools (F12) → Console tab to see detailed error logs
+                            </p>
+                          </div>
+                        )}
+                      </>
+                    )}
+                    <div className="mt-3 p-2 bg-red-100 rounded text-xs text-red-700">
+                      <strong>Quick Fix:</strong>
+                      <ol className="list-decimal list-inside mt-1 space-y-1">
+                        <li>Open backend/.env file</li>
+                        <li>Add your OpenAI API key: <code className="bg-red-200 px-1 rounded">OPENAI_API_KEY=sk-...</code></li>
+                        <li>Or add Groq API key: <code className="bg-red-200 px-1 rounded">GROQ_API_KEY=gsk_...</code></li>
+                        <li>Restart the backend server</li>
+                      </ol>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
             {messages.length === 0 ? (
               <div className="text-center py-12">
                 <Bot className="h-16 w-16 text-gray-300 mx-auto mb-4" />
@@ -383,7 +659,7 @@ const AIChat: React.FC = () => {
                     <div className="w-2 h-2 bg-green-400 rounded-full animate-bounce delay-100"></div>
                     <div className="w-2 h-2 bg-green-400 rounded-full animate-bounce delay-200"></div>
                   </div>
-                  <p className="text-xs text-gray-500 mt-2">AI is thinking...</p>
+                  <p className="text-xs text-gray-500 mt-2">OpenAI is processing your request...</p>
                 </div>
               </div>
             )}
@@ -397,22 +673,23 @@ const AIChat: React.FC = () => {
                 type="text" 
                 value={inputMessage} 
                 onChange={(e) => setInputMessage(e.target.value)}
-                placeholder="Ask me anything about your studies..."
-                className="flex-1 px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                placeholder={aiServiceConfigured === false ? "AI service not configured..." : "Ask me anything about your studies..."}
+                className="flex-1 px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all disabled:bg-gray-100 disabled:cursor-not-allowed"
                 onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-                disabled={isTyping}
+                disabled={isTyping || aiServiceConfigured === false}
               />
               <button 
                 onClick={sendMessage} 
-                disabled={!inputMessage.trim() || isTyping}
+                disabled={!inputMessage.trim() || isTyping || aiServiceConfigured === false}
                 className="px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg hover:shadow-xl"
+                title={aiServiceConfigured === false ? "AI service is not configured" : ""}
               >
                 <Send className="h-5 w-5" />
               </button>
             </div>
             
             <p className="text-xs text-gray-500 mt-2 text-center">
-              Press Enter to send • AI responses may take a few seconds
+              Press Enter to send • Powered by OpenAI GPT-3.5 • Responses typically take 2-5 seconds
             </p>
           </div>
         </div>

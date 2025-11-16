@@ -7,31 +7,33 @@ import {
   FaHome,
   FaTimes,
   FaSignOutAlt,
-  FaCalendar,
+
   FaBell,
-  FaDownload,
-  FaEye,
-  FaCheckCircle,
   FaHistory,
-  FaPlus,
-  FaTrash,
-  FaSave,
   FaEdit,
 } from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
 import StudyMaterials from "./StudyMaterials";
 import LiveTutoring from "./LiveTutoring";
 import LiveVideoChat from "./LiveVideoChat";
+import AIChat from "./AIChat";
 
 // ---------- Interfaces ----------
 interface StudentProfile {
   id: string;
   fullName: string;
   email: string;
+  phone?: string;
+  gender?: string;
+  birthdate?: string;
   grade?: string;
-  school?: string;
+  school?: string;  
   subjects?: string[];
+  avatarUrl?: string;
+  address?: string;
+  timezone?: string;
   learningGoals?: string[];
+  preferredLearningStyle?: string;
 }
 
 interface DashboardData {
@@ -70,7 +72,6 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ onLogout }) => {
       grade: "10",
       school: "",
       subjects: [],
-      learningGoals: [],
     },
     bookings: [],
     studyMaterials: [],
@@ -88,13 +89,17 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ onLogout }) => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [activePage, setActivePage] = useState("dashboard");
   const [editMode, setEditMode] = useState(false);
-  const [updatedProfile, setUpdatedProfile] = useState<StudentProfile>(dashboard.student);
+  const [editProfile, setEditProfile] = useState<StudentProfile | null>(null);
+  const [subjectsInput, setSubjectsInput] = useState("");
+  const [learningGoalsInput, setLearningGoalsInput] = useState("");
+  const [formError, setFormError] = useState<string | null>(null);
 
   // ---------- Navigation ----------
   const navItems = [
     { name: "Dashboard", path: "dashboard", icon: <FaHome /> },
     { name: "Profile", path: "profile", icon: <FaUser /> },
     { name: "Study Materials", path: "study-materials", icon: <FaBook /> },
+    { name: "AI Chat", path: "ai-chat", icon: <FaBell /> },
     { name: "Live Tutoring", path: "live-tutoring", icon: <FaVideo /> },
     { name: "Live Video Chat", path: "live-video-chat", icon: <FaVideo /> },
     { name: "Session Recordings", path: "recordings", icon: <FaVideo /> },
@@ -123,7 +128,6 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ onLogout }) => {
         const data = await res.json();
         if (data) {
           setDashboard(data);
-          setUpdatedProfile(data.student);
         }
       } catch (err: any) {
         console.error("Error fetching dashboard:", err);
@@ -153,44 +157,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ onLogout }) => {
   };
 
   // ---------- Profile Editing ----------
-  const handleProfileChange = (field: keyof StudentProfile, value: any) => {
-    setUpdatedProfile({ ...updatedProfile, [field]: value });
-  };
-
-  const handleAddItem = (field: "subjects" | "learningGoals", value: string) => {
-    if (!value.trim()) return;
-    setUpdatedProfile({
-      ...updatedProfile,
-      [field]: [...(updatedProfile[field] || []), value.trim()],
-    });
-  };
-
-  const handleRemoveItem = (field: "subjects" | "learningGoals", index: number) => {
-    const updated = [...(updatedProfile[field] || [])];
-    updated.splice(index, 1);
-    setUpdatedProfile({ ...updatedProfile, [field]: updated });
-  };
-
-  const handleSaveProfile = async () => {
-    try {
-      const res = await fetch("/api/student/profile/update", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(updatedProfile),
-      });
-
-      if (!res.ok) throw new Error("Failed to update profile");
-
-      const data = await res.json();
-      setDashboard((prev) => ({ ...prev, student: data.student }));
-      setEditMode(false);
-      alert("Profile updated successfully!");
-    } catch (err) {
-      console.error("Profile update failed:", err);
-      alert("Failed to update profile. Please try again.");
-    }
-  };
+  // REMOVE handleProfileChange, handleAddItem, handleRemoveItem, handleSaveProfile if unused in the current UI/forms.
 
   // ---------- UI ----------
   if (loading) {
@@ -341,222 +308,272 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ onLogout }) => {
 
         {/* --- Editable Profile --- */}
         {activePage === "profile" && (
-          <div className="mx-auto max-w-xl">
-            <div className="bg-white rounded-xl shadow p-6">
-              <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-4">
-                <div>
-                  <h1 className="text-2xl font-bold mb-1">My Profile</h1>
-                  <p className="text-gray-500 text-sm">Your basic info—keep it up to date!</p>
+          <div className="max-w-3xl mx-auto bg-white shadow rounded-xl p-8 mt-6 flex flex-col gap-8">
+            {!editMode ? (
+              <>
+                <div className="flex md:flex-row flex-col gap-7 items-start md:items-center">
+                  <div>
+                    {student.avatarUrl ? (
+                      <img src={student.avatarUrl} alt="Avatar" className="w-28 h-28 rounded-full object-cover border" />
+                    ) : (
+                      <div className="w-28 h-28 rounded-full bg-purple-100 flex items-center justify-center text-4xl text-purple-500 font-bold">
+                        {student.fullName[0]}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex-1">
+                    <h2 className="text-3xl font-bold text-gray-800">{student.fullName}</h2>
+                    <p className="text-gray-500 text-sm mt-1 mb-3">{student.email}</p>
+                    {!!student.grade && <p className="text-gray-600 mb-1"><span className="font-medium">Grade:</span> {student.grade}</p>}
+                    {!!student.school && <p className="text-gray-600 mb-1"><span className="font-medium">School:</span> {student.school}</p>}
+                    {!!student.phone && <p className="text-gray-600 mb-1"><span className="font-medium">Phone:</span> {student.phone}</p>}
+                    {!!student.gender && <p className="text-gray-600 mb-1"><span className="font-medium">Gender:</span> {student.gender}</p>}
+                    {!!student.birthdate && <p className="text-gray-600 mb-1"><span className="font-medium">Birthdate:</span> {student.birthdate}</p>}
+                    {!!student.address && <p className="text-gray-600 mb-1"><span className="font-medium">Address:</span> {student.address}</p>}
+                    {!!student.timezone && <p className="text-gray-600 mb-1"><span className="font-medium">Timezone:</span> {student.timezone}</p>}
+                    <button onClick={() => { setEditProfile(dashboard.student); setSubjectsInput(""); setLearningGoalsInput(""); setEditMode(true); }} className="mt-4 px-5 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700"><FaEdit className="inline mr-2"/>Edit Profile</button>
+                  </div>
                 </div>
-                <button
-                  className="bg-purple-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 mt-3 md:mt-0 disabled:opacity-50"
-                  onClick={() => setEditMode(true)}
-                  disabled={loading}
-                >
-                  <FaEdit /> Edit Profile
-                </button>
-              </div>
-              {/* Profile detail grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-gray-500 mb-1">Full Name</label>
-                  <div className="font-medium text-lg">{student.fullName}</div>
-                </div>
-                <div>
-                  <label className="block text-gray-500 mb-1">Email</label>
-                  <div className="text-gray-600">{student.email}</div>
-                </div>
-                <div>
-                  <label className="block text-gray-500 mb-1">Grade</label>
-                  <div>{student.grade || <span className="text-gray-400">Not set</span>}</div>
-                </div>
-                <div>
-                  <label className="block text-gray-500 mb-1">School</label>
-                  <div>{student.school || <span className="text-gray-400">Not set</span>}</div>
-                </div>
-                <div className="md:col-span-2">
-                  <label className="block text-gray-500 mb-1">Subjects</label>
-                  {student.subjects && student.subjects.length > 0 ? (
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mt-4">
+                  <div>
+                    <h4 className="font-semibold text-lg mb-2 text-gray-800">Learning Goals</h4>
                     <div className="flex flex-wrap gap-2">
-                      {student.subjects.map((subject, i) => (
-                        <span key={i} className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm">
-                          {subject}
-                        </span>
-                      ))}
+                    {student.learningGoals?.length ? student.learningGoals.map((goal, idx) => (
+                      <span key={idx} className="px-3 py-1 bg-yellow-100 text-yellow-800 rounded-lg text-sm">{goal}</span>
+                    )) : <span className="text-gray-500">N/A</span>}
                     </div>
-                  ) : (
-                    <span className="text-gray-400">No subjects</span>
-                  )}
-                </div>
-                <div className="md:col-span-2">
-                  <label className="block text-gray-500 mb-1">Learning Goals</label>
-                  {student.learningGoals && student.learningGoals.length > 0 ? (
+                    <h4 className="font-semibold text-lg mt-6 mb-2 text-gray-800">Preferred Learning Style</h4>
+                    <p className="text-gray-700 min-h-[24px]">{student.preferredLearningStyle || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-lg mb-2 text-gray-800">Subjects</h4>
                     <div className="flex flex-wrap gap-2">
-                      {student.learningGoals.map((goal, i) => (
-                        <span key={i} className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm">
-                          {goal}
-                        </span>
-                      ))}
+                      {student.subjects?.length ? student.subjects.map((sub, idx) => (
+                        <span key={idx} className="px-3 py-1 bg-blue-100 text-blue-700 rounded-lg text-sm">{sub}</span>
+                      )) : <span className="text-gray-500">N/A</span>}
                     </div>
-                  ) : (
-                    <span className="text-gray-400">No goals set</span>
-                  )}
+                  </div>
                 </div>
-              </div>
-            </div>
-            {/* Edit Modal */}
-            {editMode && (
-              <div className="fixed inset-0 flex items-center justify-center z-50 bg-black/30">
-                <div className="bg-white rounded-xl p-8 shadow-lg w-full max-w-lg relative">
-                  <h2 className="text-xl font-bold mb-4">Edit My Profile</h2>
-                  <form
-                    onSubmit={async (e) => {
-                      e.preventDefault();
-                      // Validate required fields
-                      if (!updatedProfile.fullName.trim()) {
-                        setError("Name is required.");
-                        return;
-                      }
-                      setLoading(true);
-                      setError(null);
-                      try {
-                        const res = await fetch("/api/student/profile/update", {
-                          method: "PUT",
-                          headers: { "Content-Type": "application/json" },
-                          credentials: "include",
-                          body: JSON.stringify(updatedProfile),
-                        });
-                        if (!res.ok) {
-                          let msg = "Failed to update profile.";
-                          try {
-                            const err = await res.json();
-                            if (err?.error || err?.message) msg = err.error || err.message;
-                          } catch {}
-                          setError(msg);
-                          if (window?.toast) window.toast.error(msg);
-                          return;
-                        }
-                        const data = await res.json();
-                        setDashboard((prev) => ({ ...prev, student: data.student }));
-                        setEditMode(false);
-                        if (window?.toast) window.toast.success("Profile updated!");
-                        else alert("Profile updated!");
-                      } catch (err) {
-                        setError("Profile update failed. Network/server error.");
-                        if (window?.toast) window.toast.error("Profile update failed. Network/server error.");
-                      } finally {
-                        setLoading(false);
-                      }
-                    }}
-                  >
-                    <div className="space-y-4">
-                      <div>
-                        <label className="block text-gray-500 mb-1">Full Name *</label>
+              </>
+            ) : (
+              <form
+                className="space-y-6"
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  setFormError(null);
+                  if (!editProfile?.fullName || !editProfile.email) {
+                    setFormError("Full name and email are required.");
+                    return;
+                  }
+                  try {
+                    const res = await fetch("/api/student/profile/update", {
+                      method: "PUT",
+                      headers: { "Content-Type": "application/json" },
+                      credentials: "include",
+                      body: JSON.stringify(editProfile),
+                    });
+                    if (!res.ok) {
+                      const err = await res.json().catch(() => null);
+                      setFormError(err?.error || err?.message || "Profile update failed.");
+                      return;
+                    }
+                    const data = await res.json();
+                    setDashboard((prev) => ({ ...prev, student: data.student }));
+                    setEditMode(false);
+                    window.toast?.success?.("Profile updated!") || alert("Profile updated!");
+                  } catch {
+                    setFormError("Network/server error.");
+                  }
+                }}
+              >
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  {/* Avatar/Photo Section */}
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-gray-500 mb-1">Profile Photo (URL)</label>
+                      <input
+                        type="text"
+                        value={editProfile?.avatarUrl || ""}
+                        onChange={e => setEditProfile(p => p ? { ...p, avatarUrl: e.target.value } : p)}
+                        className="w-full border rounded p-2"
+                        placeholder="Paste image URL here"
+                      />
+                      {editProfile?.avatarUrl && (
+                        <img src={editProfile.avatarUrl} alt="avatar" className="mt-2 w-16 h-16 rounded-full border" />
+                      )}
+                    </div>
+                    <div>
+                      <label className="block text-gray-500 mb-1">Full Name *</label>
+                      <input
+                        type="text"
+                        value={editProfile?.fullName || ""}
+                        onChange={e => setEditProfile(p => p ? { ...p, fullName: e.target.value } : p)}
+                        className="w-full border rounded p-2"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-gray-500 mb-1">Email</label>
+                      <input
+                        type="email"
+                        value={editProfile?.email || ""}
+                        disabled
+                        className="w-full border rounded p-2 bg-gray-100 text-gray-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-gray-500 mb-1">Phone</label>
+                      <input
+                        type="text"
+                        value={editProfile?.phone || ""}
+                        onChange={e => setEditProfile(p => p ? { ...p, phone: e.target.value } : p)}
+                        className="w-full border rounded p-2"
+                      />
+                    </div>
+                    <div className="flex gap-2">
+                      <div className="flex-1">
+                        <label className="block text-gray-500 mb-1">Gender</label>
+                        <select className="w-full border rounded p-2" value={editProfile?.gender || ""} onChange={e => setEditProfile(p => p ? { ...p, gender: e.target.value } : p)}>
+                          <option value="">Select</option>
+                          <option value="male">Male</option>
+                          <option value="female">Female</option>
+                          <option value="other">Other</option>
+                        </select>
+                      </div>
+                      <div className="flex-1">
+                        <label className="block text-gray-500 mb-1">Birthdate</label>
                         <input
-                          type="text"
+                          type="date"
+                          value={editProfile?.birthdate?.slice(0, 10) || ""}
+                          onChange={e => setEditProfile(p => p ? { ...p, birthdate: e.target.value } : p)}
                           className="w-full border rounded p-2"
-                          value={updatedProfile.fullName}
-                          onChange={e => handleProfileChange("fullName", e.target.value)}
-                          required
-                          autoFocus
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-gray-500 mb-1">Email</label>
-                        <input type="email" className="w-full border rounded p-2 bg-gray-100" value={updatedProfile.email} disabled />
-                      </div>
-                      <div className="flex gap-2">
-                        <div className="flex-1">
-                          <label className="block text-gray-500 mb-1">Grade</label>
-                          <input
-                            type="text"
-                            className="w-full border rounded p-2"
-                            value={updatedProfile.grade || ""}
-                            onChange={e => handleProfileChange("grade", e.target.value)}
-                          />
-                        </div>
-                        <div className="flex-1">
-                          <label className="block text-gray-500 mb-1">School</label>
-                          <input
-                            type="text"
-                            className="w-full border rounded p-2"
-                            value={updatedProfile.school || ""}
-                            onChange={e => handleProfileChange("school", e.target.value)}
-                          />
-                        </div>
-                      </div>
-                      <div>
-                        <label className="block text-gray-500 mb-1">Subjects</label>
-                        {/* Chip editor for subjects */}
-                        <div className="flex flex-wrap gap-2 mb-2">
-                          {updatedProfile.subjects?.map((s, i) => (
-                            <span key={i} className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm flex items-center gap-1">
-                              {s}
-                              <button type="button" className="ml-1 text-xs" onClick={() => handleRemoveItem("subjects", i)}>&times;</button>
-                            </span>
-                          ))}
-                        </div>
-                        <input
-                          type="text"
-                          className="w-full border rounded p-2"
-                          placeholder="Add subject and press Enter"
-                          onKeyDown={e => {
-                            if (e.key === "Enter") {
-                              handleAddItem("subjects", e.currentTarget.value);
-                              e.currentTarget.value = "";
-                            }
-                          }}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-gray-500 mb-1">Learning Goals</label>
-                        {/* Chip editor for goals */}
-                        <div className="flex flex-wrap gap-2 mb-2">
-                          {updatedProfile.learningGoals?.map((g, i) => (
-                            <span key={i} className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm flex items-center gap-1">
-                              {g}
-                              <button type="button" className="ml-1 text-xs" onClick={() => handleRemoveItem("learningGoals", i)}>&times;</button>
-                            </span>
-                          ))}
-                        </div>
-                        <input
-                          type="text"
-                          className="w-full border rounded p-2"
-                          placeholder="Add goal and press Enter"
-                          onKeyDown={e => {
-                            if (e.key === "Enter") {
-                              handleAddItem("learningGoals", e.currentTarget.value);
-                              e.currentTarget.value = "";
-                            }
-                          }}
                         />
                       </div>
                     </div>
-                    {error && <div className="text-red-600 text-sm mt-3">{error}</div>}
-                    <div className="flex gap-4 mt-8">
-                      <button type="submit" className="flex-1 bg-purple-600 text-white py-2 rounded-lg hover:bg-purple-700 focus:outline-none disabled:opacity-70" disabled={loading}>
-                        {loading ? "Saving..." : "Save Changes"}
-                      </button>
-                      <button type="button" className="flex-1 bg-gray-200 text-gray-700 py-2 rounded-lg hover:bg-gray-300" onClick={() => setEditMode(false)} disabled={loading}>
-                        Cancel
-                      </button>
+                    <div>
+                      <label className="block text-gray-500 mb-1">Address</label>
+                      <input
+                        type="text"
+                        value={editProfile?.address || ""}
+                        onChange={e => setEditProfile(p => p ? { ...p, address: e.target.value } : p)}
+                        className="w-full border rounded p-2"
+                      />
                     </div>
-                  </form>
+                    <div>
+                      <label className="block text-gray-500 mb-1">Timezone</label>
+                      <input
+                        type="text"
+                        value={editProfile?.timezone || ""}
+                        onChange={e => setEditProfile(p => p ? { ...p, timezone: e.target.value } : p)}
+                        className="w-full border rounded p-2"
+                      />
+                    </div>
+                  </div>
+                  {/* Second column: arrays, grade/school, goals */}
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-gray-500 mb-1">Grade</label>
+                      <input
+                        type="text"
+                        value={editProfile?.grade || ""}
+                        onChange={e => setEditProfile(p => p ? { ...p, grade: e.target.value } : p)}
+                        className="w-full border rounded p-2"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-gray-500 mb-1">School</label>
+                      <input
+                        type="text"
+                        value={editProfile?.school || ""}
+                        onChange={e => setEditProfile(p => p ? { ...p, school: e.target.value } : p)}
+                        className="w-full border rounded p-2"
+                      />
+                    </div>
+                    {/* Subjects (array) */}
+                    <div>
+                      <label className="block text-gray-500 mb-1">Subjects</label>
+                      <div className="flex flex-wrap gap-2 mb-2">
+                        {editProfile?.subjects?.map((subject, idx) => (
+                          <span key={idx} className="inline-flex items-center px-3 py-1 bg-blue-100 text-blue-600 rounded-lg text-sm ">{subject} <button type="button" className="ml-1 text-xs" onClick={() => setEditProfile(p => p ? { ...p, subjects: (p.subjects || []).filter((_, i) => i !== idx) } : p)}>&times;</button></span>
+                        ))}
+                      </div>
+                      <input
+                        type="text"
+                        value={subjectsInput}
+                        onChange={e => setSubjectsInput(e.target.value)}
+                        className="w-full border rounded p-2 mb-2"
+                        placeholder="Add subject and press Enter"
+                        onKeyDown={e => {
+                          if (e.key === "Enter" && editProfile && subjectsInput.trim()) {
+                            e.preventDefault();
+                            setEditProfile(p => p ? {
+                              ...p,
+                              subjects: [...(p.subjects || []), subjectsInput.trim()],
+                            } : p);
+                            setSubjectsInput("");
+                          }
+                        }}
+                      />
+                    </div>
+                    {/* Learning Goals (array) */}
+                    <div>
+                      <label className="block text-gray-500 mb-1">Learning Goals</label>
+                      <div className="flex flex-wrap gap-2 mb-2">
+                        {editProfile?.learningGoals?.map((goal, idx) => (
+                          <span key={idx} className="inline-flex items-center px-3 py-1 bg-yellow-100 text-yellow-700 rounded-lg text-sm ">{goal} <button type="button" className="ml-1 text-xs" onClick={() => setEditProfile(p => p ? { ...p, learningGoals: (p.learningGoals || []).filter((_, i) => i !== idx) } : p)}>&times;</button></span>
+                        ))}
+                      </div>
+                      <input
+                        type="text"
+                        value={learningGoalsInput}
+                        onChange={e => setLearningGoalsInput(e.target.value)}
+                        className="w-full border rounded p-2 mb-2"
+                        placeholder="Add goal and press Enter"
+                        onKeyDown={e => {
+                          if (e.key === "Enter" && editProfile && learningGoalsInput.trim()) {
+                            e.preventDefault();
+                            setEditProfile(p => p ? {
+                              ...p,
+                              learningGoals: [...(p.learningGoals || []), learningGoalsInput.trim()],
+                            } : p);
+                            setLearningGoalsInput("");
+                          }
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-gray-500 mb-1">Preferred Learning Style</label>
+                      <input
+                        type="text"
+                        value={editProfile?.preferredLearningStyle || ""}
+                        onChange={e => setEditProfile(p => p ? { ...p, preferredLearningStyle: e.target.value } : p)}
+                        className="w-full border rounded p-2"
+                        placeholder="e.g., Visual, Auditory, ..."
+                      />
+                    </div>
+                  </div>
                 </div>
-              </div>
+                {formError && <div className="text-red-600 text-sm mt-3">{formError}</div>}
+                <div className="flex gap-4 mt-8 sticky bottom-0 bg-white py-4 z-10">
+                  <button type="submit" className="flex-1 bg-purple-600 text-white py-2 rounded-lg hover:bg-purple-700 disabled:opacity-70">Save Changes</button>
+                  <button type="button" className="flex-1 bg-gray-200 text-gray-700 py-2 rounded-lg hover:bg-gray-300" onClick={() => { setEditMode(false); setFormError(null); setEditProfile(null); }}>Cancel</button>
+                </div>
+              </form>
             )}
           </div>
         )}
 
         {/* Keep other sections (study-materials, tutoring, etc.) unchanged */}
         {activePage === "study-materials" && <StudyMaterials />}
+        {activePage === "ai-chat" && <AIChat />}
         {activePage === "live-tutoring" && <LiveTutoring />}
         {activePage === "live-video-chat" && (
           <LiveVideoChat
             onEndCall={() => setActivePage("dashboard")}
             teacherName="Teacher"
             studentName={student.fullName}
-          />
+          />  
         )}
       </div>
     </div>
