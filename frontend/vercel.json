@@ -2,11 +2,11 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://knowledgehub-backend-url.onrender.com/api/:path*"
+      "destination": "https://knowledgehub-4is7.onrender.com/api/:path*"
     },
     {
       "source": "/uploads/:path*",
-      "destination": "https://knowledgehub-backend-url.onrender.com/uploads/:path*"
+      "destination": "https://knowledgehub-4is7.onrender.com/uploads/:path*"
     }
   ]
 }
