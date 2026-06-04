@@ -7,6 +7,10 @@
     {
       "source": "/uploads/:path*",
       "destination": "https://knowledgehub-4is7.onrender.com/uploads/:path*"
+    },
+    {
+      "source": "/((?!api|uploads).*)",
+      "destination": "/index.html"
     }
   ]
 }

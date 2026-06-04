@@ -49,23 +49,20 @@ router.post("/register", async (req, res) => {
       });
     }
 
-    // Hash password
-    const hashedPassword = await bcrypt.hash(password, 10);
-
     // Create user based on role
     let user;
     if (role === "student") {
       user = new Student({
         fullName: name,
         email,
-        password: hashedPassword,
+        password,
         role: "student"
       });
     } else if (role === "teacher") {
       user = new Teacher({
         fullName: name,
         email,
-        password: hashedPassword,
+        password,
         role: "teacher"
       });
     } else {
@@ -321,9 +318,7 @@ router.post("/reset-password/:token", async (req, res) => {
       });
     }
 
-    // Hash new password
-    const hashedPassword = await bcrypt.hash(password, 10);
-    user.password = hashedPassword;
+    user.password = password;
     user.resetPasswordToken = undefined;
     user.resetPasswordExpires = undefined;
     await user.save();
