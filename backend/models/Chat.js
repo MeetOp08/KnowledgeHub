@@ -1,10 +1,11 @@
+// backend/models/Chat.js
 import mongoose from "mongoose";
 
 const chatSchema = new mongoose.Schema({
   sessionId: {
     type: String,
     required: true,
-    index: true
+    unique: true
   },
   userId: {
     type: String,
@@ -17,7 +18,7 @@ const chatSchema = new mongoose.Schema({
   messages: [{
     role: {
       type: String,
-      enum: ['user', 'assistant'],
+      enum: ['user', 'assistant', 'system'],
       required: true
     },
     content: {
@@ -37,13 +38,16 @@ const chatSchema = new mongoose.Schema({
     type: Date,
     default: Date.now
   }
+}, {
+  versionKey: false
 });
 
-// Update the updatedAt field before saving
 chatSchema.pre('save', function(next) {
   this.updatedAt = Date.now();
   next();
 });
+
+chatSchema.index({ userId: 1, updatedAt: -1 });
 
 const Chat = mongoose.model('Chat', chatSchema);
 

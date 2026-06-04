@@ -14,9 +14,9 @@ import {
 } from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
 import StudyMaterials from "./StudyMaterials";
-import LiveTutoring from "./LiveTutoring";
-import LiveVideoChat from "./LiveVideoChat";
 import AIChat from "./AIChat";
+import LiveTutoring from "./LiveTutoring";
+import LiveVideoChat, { LiveSessionRecording } from "./LiveVideoChat";
 
 // ---------- Interfaces ----------
 interface StudentProfile {
@@ -54,11 +54,15 @@ interface StudentDashboardProps {
   onLogout?: () => Promise<void>;
 }
 
+interface SessionRecording extends LiveSessionRecording {}
+
 declare global {
   interface Window {
     toast?: { success: (msg: string) => void; error: (msg: string) => void };
   }
 }
+
+const RECORDINGS_STORAGE_KEY = "khub-session-recordings-v1";
 
 const StudentDashboard: React.FC<StudentDashboardProps> = ({ onLogout }) => {
   const navigate = useNavigate();
@@ -93,6 +97,101 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ onLogout }) => {
   const [subjectsInput, setSubjectsInput] = useState("");
   const [learningGoalsInput, setLearningGoalsInput] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
+  const [showRatingModal, setShowRatingModal] = useState(false);
+  const [ratingTeacherName, setRatingTeacherName] = useState<string | null>(null);
+  const [ratingValue, setRatingValue] = useState<number>(0);
+  const [ratingComment, setRatingComment] = useState("");
+  const [ratingSubmitting, setRatingSubmitting] = useState(false);
+  const [ratingBookingId, setRatingBookingId] = useState<string | null>(null);
+  const [sessionRecordings, setSessionRecordings] = useState<SessionRecording[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const raw = localStorage.getItem(RECORDINGS_STORAGE_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch (err) {
+      console.error("Failed to load recordings from storage:", err);
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = localStorage.getItem(RECORDINGS_STORAGE_KEY);
+      if (raw) {
+        setSessionRecordings(current => (current.length ? current : JSON.parse(raw)));
+      }
+    } catch (err) {
+      console.error("Failed to hydrate recordings:", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      localStorage.setItem(RECORDINGS_STORAGE_KEY, JSON.stringify(sessionRecordings));
+    } catch (err) {
+      console.error("Failed to persist recordings:", err);
+    }
+  }, [sessionRecordings]);
+
+  const handleRecordingSaved = (recording: LiveSessionRecording) => {
+    setSessionRecordings(prev => [recording, ...prev]);
+    window.toast?.success?.("Session recording saved to your dashboard.") ?? console.info("Recording saved");
+  };
+
+  const downloadStoredRecording = (recording: SessionRecording) => {
+    const link = document.createElement("a");
+    link.href = recording.dataUrl;
+    link.download = recording.filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const formatRecordingDuration = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  const handleEndLiveCall = (bookingId?: string, teacherNameOverride?: string) => {
+    setRatingTeacherName(teacherNameOverride || "Teacher");
+    setRatingValue(0);
+    setRatingComment("");
+    setRatingBookingId(bookingId || null);
+    setShowRatingModal(true);
+    setActivePage("dashboard");
+  };
+
+  const handleSubmitRating = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!ratingValue) {
+      window.toast?.error?.("Please select a rating.") ?? alert("Please select a rating.");
+      return;
+    }
+    try {
+      setRatingSubmitting(true);
+      if (ratingBookingId) {
+        await fetch(`/api/booking/${ratingBookingId}/rate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ rating: ratingValue, feedback: ratingComment }),
+        });
+      } else {
+        // Fallback: no booking context yet, just simulate
+        await new Promise((resolve) => setTimeout(resolve, 400));
+      }
+      window.toast?.success?.("Thank you for rating your teacher!") ?? alert("Thank you for your rating!");
+      setShowRatingModal(false);
+    } catch (err) {
+      console.error("Rating submit failed:", err);
+      window.toast?.error?.("Failed to submit rating.") ?? alert("Failed to submit rating.");
+    } finally {
+      setRatingSubmitting(false);
+    }
+  };
 
   // ---------- Navigation ----------
   const navItems = [
@@ -101,7 +200,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ onLogout }) => {
     { name: "Study Materials", path: "study-materials", icon: <FaBook /> },
     { name: "AI Chat", path: "ai-chat", icon: <FaBell /> },
     { name: "Live Tutoring", path: "live-tutoring", icon: <FaVideo /> },
-    { name: "Live Video Chat", path: "live-video-chat", icon: <FaVideo /> },
+    // { name: "Live Video Chat", path: "live-video-chat", icon: <FaVideo /> },
     { name: "Session Recordings", path: "recordings", icon: <FaVideo /> },
   ];
 
@@ -183,7 +282,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ onLogout }) => {
   const { student } = dashboard;
 
   return (
-    <div className="flex min-h-screen bg-gray-100">
+    <div className="flex h-screen bg-gray-100 overflow-hidden">
       {/* Sidebar */}
       <div
         className={`bg-white shadow-lg h-screen flex flex-col transition-all duration-300 ${
@@ -570,12 +669,123 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ onLogout }) => {
         {activePage === "live-tutoring" && <LiveTutoring />}
         {activePage === "live-video-chat" && (
           <LiveVideoChat
-            onEndCall={() => setActivePage("dashboard")}
+            onEndCall={handleEndLiveCall}
             teacherName="Teacher"
             studentName={student.fullName}
+            onRecordingReady={handleRecordingSaved}
           />  
         )}
+        {activePage === "recordings" && (
+          <div className="mt-6 space-y-6">
+            <div>
+              <h1 className="text-3xl font-bold mb-2">Session Recordings</h1>
+              <p className="text-gray-600">
+                Every time you finish a live video session, the recording is saved here for future review.
+              </p>
+            </div>
+            {sessionRecordings.length === 0 ? (
+              <div className="bg-white rounded-xl p-8 text-center shadow">
+                <p className="text-gray-500">No recordings yet. Join a live session to automatically save it here.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {sessionRecordings.map((rec) => (
+                  <div key={rec.id} className="bg-white rounded-xl shadow border border-gray-100 overflow-hidden flex flex-col">
+                    <video controls src={rec.dataUrl} className="w-full h-56 object-cover bg-black" />
+                    <div className="p-4 flex flex-col gap-2">
+                      <div>
+                        <p className="font-semibold text-gray-800">{rec.filename}</p>
+                        <p className="text-sm text-gray-500">
+                          Saved on {new Date(rec.createdAt).toLocaleString()} • {formatRecordingDuration(rec.duration)}
+                        </p>
+                      </div>
+                      <div className="flex gap-3 mt-2">
+                        <button
+                          className="flex-1 px-4 py-2 rounded-lg bg-purple-600 text-white font-semibold hover:bg-purple-700 transition"
+                          onClick={() => downloadStoredRecording(rec)}
+                        >
+                          Download
+                        </button>
+                        <a
+                          href={rec.dataUrl}
+                          download={rec.filename}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex-1 px-4 py-2 rounded-lg border border-gray-300 text-gray-600 text-center hover:bg-gray-50 transition"
+                        >
+                          Open in new tab
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
+      {showRatingModal && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black bg-opacity-40">
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full mx-4 p-6">
+            <h2 className="text-xl font-bold mb-2 text-gray-900">
+              Rate your session{ratingTeacherName ? ` with ${ratingTeacherName}` : ""}
+            </h2>
+            <p className="text-sm text-gray-600 mb-4">
+              How was your experience? Your feedback helps improve future sessions.
+            </p>
+            <form onSubmit={handleSubmitRating} className="space-y-4">
+              <div>
+                <p className="text-sm font-medium text-gray-800 mb-1">Rating</p>
+                <div className="flex gap-2">
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <button
+                      key={star}
+                      type="button"
+                      onClick={() => setRatingValue(star)}
+                      className={`w-9 h-9 rounded-full flex items-center justify-center border transition ${
+                        ratingValue >= star
+                          ? "bg-yellow-400 border-yellow-500 text-white"
+                          : "bg-white border-gray-300 text-gray-400 hover:bg-yellow-100"
+                      }`}
+                    >
+                      ★
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-800 mb-1">
+                  Comments (optional)
+                </label>
+                <textarea
+                  value={ratingComment}
+                  onChange={(e) => setRatingComment(e.target.value)}
+                  rows={3}
+                  className="w-full border rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  placeholder="Share what worked well or what could be improved..."
+                />
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 text-sm hover:bg-gray-50"
+                  onClick={() => setShowRatingModal(false)}
+                  disabled={ratingSubmitting}
+                >
+                  Skip
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-lg bg-purple-600 text-white text-sm font-semibold hover:bg-purple-700 disabled:opacity-60"
+                  disabled={ratingSubmitting}
+                >
+                  {ratingSubmitting ? "Submitting..." : "Submit Rating"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

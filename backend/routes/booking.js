@@ -302,6 +302,50 @@ router.put("/:id/complete", async (req, res) => {
   }
 });
 
+// Rate a completed session (student side)
+router.post("/:id/rate", async (req, res) => {
+  try {
+    if (!req.session.user || req.session.user.role !== "student") {
+      return res.status(403).json({ message: "Only students can rate sessions" });
+    }
+
+    const { rating, feedback } = req.body;
+
+    if (!isMongoDBAvailable()) {
+      return res.status(503).json({ message: "Database not available" });
+    }
+
+    if (!rating || rating < 1 || rating > 5) {
+      return res.status(400).json({ message: "Rating must be between 1 and 5" });
+    }
+
+    const booking = await Booking.findById(req.params.id);
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+
+    if (booking.studentId.toString() !== req.session.user.id) {
+      return res.status(403).json({ message: "You can only rate your own sessions" });
+    }
+
+    if (booking.status !== "completed") {
+      return res.status(400).json({ message: "You can only rate completed sessions" });
+    }
+
+    booking.rating = rating;
+    if (typeof feedback === "string") {
+      booking.feedback = feedback;
+    }
+
+    await booking.save();
+
+    res.json({ message: "Rating saved", booking });
+  } catch (error) {
+    console.error("Rate session error:", error);
+    res.status(500).json({ message: "Failed to save rating" });
+  }
+});
+
 // Get recordings
 router.get("/recordings", async (req, res) => {
   try {

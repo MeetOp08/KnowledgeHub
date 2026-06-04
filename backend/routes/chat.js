@@ -1,28 +1,69 @@
+// backend/routes/chat.js
 import express from "express";
 import mongoose from "mongoose";
 import Chat from "../models/Chat.js";
-import { Groq } from "groq-sdk";
 import OpenAI from "openai";
+import { Groq } from "groq-sdk";
 
 const router = express.Router();
 
-// Initialize AI clients conditionally
-let groq = null;
 let openai = null;
+let groq = null;
 
-if (process.env.GROQ_API_KEY) {
-  groq = new Groq({
-    apiKey: process.env.GROQ_API_KEY,
-  });
+// small helpers
+const mask = (s) => (s ? (s.length > 10 ? `${s.slice(0,6)}...${s.slice(-4)}` : s) : "NOT SET");
+const looksLikeRealKey = (k) => !!k && !k.includes("your-") && !k.includes("placeholder") && k.length > 20;
+
+console.log("\n🤖 Initializing AI Services (routes/chat.js)...");
+
+const openaiKey = process.env.OPENAI_API_KEY || "";
+const groqKey = process.env.GROQ_API_KEY || "";
+
+console.log("   OPENAI_API_KEY:", mask(openaiKey));
+console.log("   GROQ_API_KEY:  ", mask(groqKey));
+console.log("   AI_PROVIDER:   ", process.env.AI_PROVIDER || "openai");
+
+try {
+  if (looksLikeRealKey(openaiKey)) {
+    try {
+      openai = new OpenAI({ apiKey: openaiKey });
+      console.log("   ✅ OpenAI client initialized");
+      console.log("   → has openai.chat.completions.create:", !!openai?.chat?.completions?.create);
+      console.log("   → has openai.responses.create:", !!openai?.responses?.create);
+    } catch (err) {
+      openai = null;
+      console.error("   ❌ OpenAI initialization failed:", err?.message || err);
+    }
+  } else if (openaiKey) {
+    console.warn("   ⚠️  OPENAI_API_KEY appears to be a placeholder/invalid value");
+  } else {
+    console.log("   ⚠️  OPENAI_API_KEY not provided");
+  }
+
+  if (looksLikeRealKey(groqKey)) {
+    try {
+      groq = new Groq({ apiKey: groqKey });
+      console.log("   ✅ Groq client initialized");
+    } catch (err) {
+      groq = null;
+      console.error("   ❌ Groq initialization failed:", err?.message || err);
+    }
+  } else if (groqKey) {
+    console.warn("   ⚠️  GROQ_API_KEY appears to be a placeholder/invalid value");
+  } else {
+    console.log("   ⚠️  GROQ_API_KEY not provided");
+  }
+} catch (fatalErr) {
+  console.error("   ❌ Unexpected error during AI init:", fatalErr);
 }
 
-if (process.env.OPENAI_API_KEY) {
-  openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-  });
+if (!openai && !groq) {
+  console.error("\n   ❌ CRITICAL: No AI service available after initialization!");
+  console.error("   → Ensure at least ONE valid API key is provided in backend/.env and run `npm install openai groq-sdk`.\n");
+} else {
+  console.log("\n   ✅ At least one AI client is available.");
 }
 
-// Check if MongoDB is available
 const isMongoDBAvailable = () => {
   try {
     return mongoose.connection.readyState === 1;
@@ -31,241 +72,214 @@ const isMongoDBAvailable = () => {
   }
 };
 
-// Send message to AI
+const getGroqResponse = async (messages) => {
+  if (!groq) throw new Error("Groq client not initialized");
+  const completion = await groq.chat.completions.create({
+    messages,
+    model: process.env.GROQ_MODEL || "llama-3.1-8b-instant",
+    temperature: parseFloat(process.env.GROQ_TEMPERATURE || "0.7"),
+    max_tokens: parseInt(process.env.GROQ_MAX_TOKENS || "1024"),
+  });
+
+  return {
+    success: true,
+    content: completion.choices?.[0]?.message?.content || "I'm sorry, I couldn't generate a response.",
+    provider: "groq"
+  };
+};
+
+const getOpenAIResponse = async (messages) => {
+  if (!openai) throw new Error("OpenAI client not initialized");
+
+  // Try chat.completions.create (older shape)
+  if (openai?.chat?.completions?.create) {
+    const completion = await openai.chat.completions.create({
+      model: process.env.OPENAI_MODEL || "gpt-3.5-turbo",
+      messages,
+      temperature: parseFloat(process.env.OPENAI_TEMPERATURE || "0.7"),
+      max_tokens: parseInt(process.env.OPENAI_MAX_TOKENS || "1024"),
+    });
+
+    const content = completion.choices?.[0]?.message?.content || completion.choices?.[0]?.text || "";
+    return { success: true, content: content || "I'm sorry, I couldn't generate a response.", provider: "openai" };
+  }
+
+  // Try responses.create (newer shape)
+  if (openai?.responses?.create) {
+    const inputText = messages.map(m => `${m.role}: ${m.content}`).join("\n");
+    const resp = await openai.responses.create({
+      model: process.env.OPENAI_MODEL || "gpt-3.5-turbo",
+      input: inputText,
+      temperature: parseFloat(process.env.OPENAI_TEMPERATURE || "0.7"),
+      max_tokens: parseInt(process.env.OPENAI_MAX_TOKENS || "1024"),
+    });
+
+    let out = "";
+    if (resp.output_text) out = resp.output_text;
+    else if (Array.isArray(resp.output) && resp.output[0]?.content) {
+      out = resp.output[0].content.map(c => c?.text || "").join("");
+    } else if (resp.output?.length) {
+      out = JSON.stringify(resp.output);
+    } else {
+      out = String(resp);
+    }
+
+    return { success: true, content: out || "I'm sorry, I couldn't generate a response.", provider: "openai" };
+  }
+
+  throw new Error("OpenAI client does not expose known chat/response methods");
+};
+
+const getAIResponse = async (messages, provider = null) => {
+  const preferredProvider = (provider || process.env.AI_PROVIDER || "openai").toLowerCase();
+
+  const systemMessage = {
+    role: "system",
+    content: "You are a helpful AI assistant for KnowledgeHub, an online learning platform. Help students with their questions, provide clear explanations, and guide their learning. Be friendly, encouraging, and educational."
+  };
+
+  const conversationMessages = [systemMessage, ...messages];
+
+  if ((preferredProvider === "openai" && openai) || (!groq && openai)) {
+    try {
+      return await getOpenAIResponse(conversationMessages);
+    } catch (err) {
+      console.error("   → OpenAI call failed:", err);
+      if (groq) {
+        console.log("   → Falling back to Groq...");
+        return await getGroqResponse(conversationMessages);
+      }
+      throw err;
+    }
+  }
+
+  if (groq) {
+    return await getGroqResponse(conversationMessages);
+  }
+
+  throw new Error("No AI service available. Please configure OPENAI_API_KEY or GROQ_API_KEY in .env file");
+};
+
+// ----- Routes -----
+
+// Send message to AI (ChatGPT-like conversation)
 router.post("/", async (req, res) => {
   try {
     const { message, userId, sessionId } = req.body;
 
     if (!message || !userId) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Message and userId are required" 
+      return res.status(400).json({
+        success: false,
+        message: "Message and userId are required"
       });
     }
 
-    // Check if at least one AI service is configured
-    if (!process.env.GROQ_API_KEY && !process.env.OPENAI_API_KEY) {
-      console.error("❌ AI SERVICE ERROR: No API keys configured");
-      console.error("   - OPENAI_API_KEY:", process.env.OPENAI_API_KEY ? "✅ Set" : "❌ Not set");
-      console.error("   - GROQ_API_KEY:", process.env.GROQ_API_KEY ? "✅ Set" : "❌ Not set");
-      console.error("   - AI_PROVIDER:", process.env.AI_PROVIDER || "Not set (default: openai)");
-      return res.status(503).json({ 
-        success: false, 
-        message: "AI service not configured. Please set GROQ_API_KEY or OPENAI_API_KEY in .env file" 
+    const hasValidOpenAI = !!process.env.OPENAI_API_KEY && !process.env.OPENAI_API_KEY.includes("your-");
+    const hasValidGroq = !!process.env.GROQ_API_KEY && !process.env.GROQ_API_KEY.includes("your-");
+
+    if (!hasValidOpenAI && !hasValidGroq) {
+      return res.status(503).json({
+        success: false,
+        message: "AI service not configured. Please set OPENAI_API_KEY or GROQ_API_KEY in .env file"
+      });
+    }
+
+    if (!openai && !groq) {
+      return res.status(503).json({
+        success: false,
+        message: "AI service initialization failed. Please check your API keys in .env file"
       });
     }
 
     if (!isMongoDBAvailable()) {
-      console.error("❌ DATABASE ERROR: MongoDB not available");
-      console.error("   - Connection State:", mongoose.connection.readyState);
-      console.error("   - MongoDB URI:", process.env.MONGODB_URI || "mongodb://localhost:27017/knowledgehub (default)");
-      return res.status(503).json({ 
-        success: false, 
-        message: "Database not available" 
+      return res.status(503).json({
+        success: false,
+        message: "Database not available. Please check MongoDB connection."
       });
     }
 
-    // Generate session ID if not provided (auto-generated)
     const chatSessionId = sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-    try {
-      let aiResponse = "I'm sorry, I couldn't generate a response. Please try again.";
-      const preferredProvider = process.env.AI_PROVIDER?.toLowerCase() || "openai";
-      
-      // Try to get AI response - prefer OpenAI if available, fallback to Groq
-      if ((preferredProvider === "openai" && openai) || (!groq && openai)) {
-        // Use OpenAI
-        try {
-          const completion = await openai.chat.completions.create({
-            model: "gpt-3.5-turbo",
-            messages: [
-              {
-                role: "system",
-                content: "You are a helpful AI tutor for KnowledgeHub, an online learning platform. Help students with their questions, provide explanations, and guide their learning. Be friendly, encouraging, and educational."
-              },
-              {
-                role: "user",
-                content: message
-              }
-            ],
-            temperature: 0.7,
-            max_tokens: 1024,
-          });
-          aiResponse = completion.choices[0]?.message?.content || aiResponse;
-        } catch (openaiError) {
-          console.error("❌ OpenAI API ERROR:", openaiError.message || openaiError);
-          console.error("   - Error Type:", openaiError.constructor?.name || "Unknown");
-          try {
-            const errorStr = JSON.stringify(openaiError, Object.getOwnPropertyNames(openaiError));
-            console.error("   - Error Details:", errorStr.substring(0, 300));
-          } catch {
-            console.error("   - Error Details:", String(openaiError));
-          }
-          if (openaiError.response) {
-            console.error("   - Status:", openaiError.response.status);
-            console.error("   - Status Text:", openaiError.response.statusText);
-          }
-          if (openaiError.status) {
-            console.error("   - HTTP Status:", openaiError.status);
-          }
-          // Fallback to Groq if OpenAI fails
-          if (groq) {
-            try {
-              const completion = await groq.chat.completions.create({
-                messages: [
-                  {
-                    role: "system",
-                    content: "You are a helpful AI tutor for KnowledgeHub, an online learning platform. Help students with their questions, provide explanations, and guide their learning. Be friendly, encouraging, and educational."
-                  },
-                  {
-                    role: "user",
-                    content: message
-                  }
-                ],
-                model: "llama-3.1-8b-instant",
-                temperature: 0.7,
-                max_tokens: 1024,
-              });
-              aiResponse = completion.choices[0]?.message?.content || aiResponse;
-            } catch (groqError) {
-              console.error("❌ Groq API ERROR (fallback failed):", groqError.message || groqError);
-              console.error("   - Error Type:", groqError.constructor?.name || "Unknown");
-              throw openaiError; // Throw original error
-            }
-          } else {
-            throw openaiError;
-          }
-        }
-      } else if (groq) {
-        // Use Groq as fallback
-        try {
-          const completion = await groq.chat.completions.create({
-            messages: [
-              {
-                role: "system",
-                content: "You are a helpful AI tutor for KnowledgeHub, an online learning platform. Help students with their questions, provide explanations, and guide their learning. Be friendly, encouraging, and educational."
-              },
-              {
-                role: "user",
-                content: message
-              }
-            ],
-            model: "llama-3.1-8b-instant",
-            temperature: 0.7,
-            max_tokens: 1024,
-          });
-          aiResponse = completion.choices[0]?.message?.content || aiResponse;
-        } catch (groqError) {
-          console.error("❌ Groq API ERROR:", groqError.message || groqError);
-          console.error("   - Error Type:", groqError.constructor?.name || "Unknown");
-          try {
-            const errorStr = JSON.stringify(groqError, Object.getOwnPropertyNames(groqError));
-            console.error("   - Error Details:", errorStr.substring(0, 300));
-          } catch {
-            console.error("   - Error Details:", String(groqError));
-          }
-          if (groqError.status) {
-            console.error("   - HTTP Status:", groqError.status);
-          }
-          throw groqError;
-        }
-      }
+    let chat = await Chat.findOne({ sessionId: chatSessionId });
 
-      // Save chat to database
-      let chat = await Chat.findOne({ sessionId: chatSessionId });
-      
-      if (!chat) {
-        // Generate title from first message (truncate to 50 chars)
-        const chatTitle = message.length > 50 ? message.substring(0, 50) + "..." : message;
-        
-        chat = new Chat({
-          sessionId: chatSessionId,
-          userId: userId,
-          title: chatTitle,
-          messages: []
-        });
-      }
-
-      // Add user message
-      chat.messages.push({
-        role: "user",
-        content: message,
-        timestamp: new Date()
-      });
-
-      // Add AI response
-      chat.messages.push({
-        role: "assistant",
-        content: aiResponse,
-        timestamp: new Date()
-      });
-
-      await chat.save();
-
-      res.json({
-        success: true,
-        reply: aiResponse,
-        sessionId: chatSessionId
-      });
-
-    } catch (aiError) {
-      console.error("❌ AI API ERROR (Catch Block):", aiError.message || aiError);
-      console.error("   - Stack:", aiError.stack?.substring(0, 300));
-      try {
-        const errorStr = JSON.stringify(aiError, Object.getOwnPropertyNames(aiError));
-        console.error("   - Full Error:", errorStr.substring(0, 500));
-      } catch {
-        console.error("   - Full Error:", String(aiError));
-      }
-      res.status(500).json({ 
-        success: false, 
-        message: "AI service temporarily unavailable. Please check your API keys in .env file.",
-        error: aiError.message,
-        errorType: aiError.constructor?.name || "Unknown"
+    if (!chat) {
+      const chatTitle = message.length > 50 ? message.substring(0, 50) + "..." : message;
+      chat = new Chat({
+        sessionId: chatSessionId,
+        userId: userId,
+        title: chatTitle,
+        messages: []
       });
     }
 
-  } catch (error) {
-    console.error("❌ CHAT ERROR (General):", error.message || error);
-    console.error("   - Stack:", error.stack?.substring(0, 300));
-    try {
-      const errorStr = JSON.stringify(error, Object.getOwnPropertyNames(error));
-      console.error("   - Full Error:", errorStr.substring(0, 500));
-    } catch {
-      console.error("   - Full Error:", String(error));
+    chat.messages.push({
+      role: "user",
+      content: message,
+      timestamp: new Date()
+    });
+
+    const recentMessages = chat.messages.slice(-10).map(msg => ({
+      role: msg.role,
+      content: msg.content
+    }));
+
+    const aiResponse = await getAIResponse(recentMessages);
+
+    chat.messages.push({
+      role: "assistant",
+      content: aiResponse.content,
+      timestamp: new Date()
+    });
+
+    await chat.save();
+
+    res.json({
+      success: true,
+      reply: aiResponse.content,
+      sessionId: chatSessionId,
+      provider: aiResponse.provider
+    });
+
+  } catch (aiError) {
+    console.error("\n❌ AI API Error in chat route:", aiError?.message || aiError);
+    if (aiError.message?.includes("No AI service available")) {
+      return res.status(500).json({
+        success: false,
+        message: "AI service not configured. Please add OPENAI_API_KEY or GROQ_API_KEY to backend/.env",
+        error: aiError.message
+      });
     }
-    res.status(500).json({ 
-      success: false, 
-      message: "Failed to process message",
-      error: error.message,
-      errorType: error.constructor?.name || "Unknown"
+    res.status(500).json({
+      success: false,
+      message: "AI service temporarily unavailable. Please check your API keys in .env file.",
+      error: aiError.message || String(aiError)
     });
   }
 });
 
-// Get chat history
+// Get chat history for a session
 router.get("/history/:sessionId", async (req, res) => {
   try {
     const { sessionId } = req.params;
     const { userId } = req.query;
 
     if (!sessionId || !userId) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Session ID and userId are required" 
+      return res.status(400).json({
+        success: false,
+        message: "Session ID and userId are required"
       });
     }
 
     if (!isMongoDBAvailable()) {
-      return res.status(503).json({ 
-        success: false, 
-        message: "Database not available" 
+      return res.status(503).json({
+        success: false,
+        message: "Database not available"
       });
     }
 
-    const chat = await Chat.findOne({ 
+    const chat = await Chat.findOne({
       sessionId: sessionId,
-      userId: userId 
+      userId: userId
     });
 
     if (!chat) {
@@ -277,41 +291,43 @@ router.get("/history/:sessionId", async (req, res) => {
 
     res.json({
       success: true,
-      messages: chat.messages
+      messages: chat.messages,
+      title: chat.title
     });
 
   } catch (error) {
     console.error("Get chat history error:", error);
-    res.status(500).json({ 
-      success: false, 
+    res.status(500).json({
+      success: false,
       message: "Failed to fetch chat history",
-      error: error.message 
+      error: error.message
     });
   }
 });
 
-// Get all chat sessions for user
+// Get all chat sessions for a user
 router.get("/sessions/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
 
     if (!userId) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "UserId is required" 
+      return res.status(400).json({
+        success: false,
+        message: "UserId is required"
       });
     }
 
     if (!isMongoDBAvailable()) {
-      return res.status(503).json({ 
-        success: false, 
-        message: "Database not available" 
+      return res.status(503).json({
+        success: false,
+        message: "Database not available"
       });
     }
 
     const chats = await Chat.find({ userId: userId })
       .select("sessionId title createdAt updatedAt messages")
-      .sort({ updatedAt: -1 });
+      .sort({ updatedAt: -1 })
+      .limit(50);
 
     const sessions = chats.map(chat => ({
       sessionId: chat.sessionId,
@@ -319,7 +335,7 @@ router.get("/sessions/:userId", async (req, res) => {
       createdAt: chat.createdAt,
       updatedAt: chat.updatedAt,
       messageCount: chat.messages.length,
-      lastMessage: chat.messages.length > 0 ? chat.messages[chat.messages.length - 1].content : ""
+      lastMessage: chat.messages.length > 0 ? chat.messages[chat.messages.length - 1].content.substring(0, 100) : ""
     }));
 
     res.json({
@@ -329,43 +345,43 @@ router.get("/sessions/:userId", async (req, res) => {
 
   } catch (error) {
     console.error("Get chat sessions error:", error);
-    res.status(500).json({ 
-      success: false, 
+    res.status(500).json({
+      success: false,
       message: "Failed to fetch chat sessions",
-      error: error.message 
+      error: error.message
     });
   }
 });
 
-// Delete chat session
+// Delete a chat session
 router.delete("/session/:sessionId", async (req, res) => {
   try {
     const { sessionId } = req.params;
     const { userId } = req.query;
 
     if (!sessionId || !userId) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Session ID and userId are required" 
+      return res.status(400).json({
+        success: false,
+        message: "Session ID and userId are required"
       });
     }
 
     if (!isMongoDBAvailable()) {
-      return res.status(503).json({ 
-        success: false, 
-        message: "Database not available" 
+      return res.status(503).json({
+        success: false,
+        message: "Database not available"
       });
     }
 
-    const result = await Chat.deleteOne({ 
+    const result = await Chat.deleteOne({
       sessionId: sessionId,
-      userId: userId 
+      userId: userId
     });
 
     if (result.deletedCount === 0) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "Chat session not found" 
+      return res.status(404).json({
+        success: false,
+        message: "Chat session not found"
       });
     }
 
@@ -376,10 +392,10 @@ router.delete("/session/:sessionId", async (req, res) => {
 
   } catch (error) {
     console.error("Delete chat session error:", error);
-    res.status(500).json({ 
-      success: false, 
+    res.status(500).json({
+      success: false,
       message: "Failed to delete chat session",
-      error: error.message 
+      error: error.message
     });
   }
 });

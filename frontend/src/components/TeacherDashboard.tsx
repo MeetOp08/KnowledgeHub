@@ -136,7 +136,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onLogout }) => {
     { name: "Profile", path: "profile", icon: <FaUser /> },
     { name: "Study Materials", path: "study-materials", icon: <FaFileAlt /> },
     { name: "Bookings", path: "bookings", icon: <FaClipboardList /> },
-    { name: "Live Video Chat", path: "live-video-chat", icon: <FaVideo /> },
+    // { name: "Live Video Chat", path: "live-video-chat", icon: <FaVideo /> },
     { name: "Session Recordings", path: "recordings", icon: <FaVideo /> }
   ];
 
@@ -921,7 +921,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ onLogout }) => {
 
   // ---------- JSX ----------
   return (
-    <div className="flex min-h-screen bg-gray-50">
+    <div className="flex h-screen bg-gray-50 overflow-hidden">
       {/* Sidebar */}
       <div className={`bg-white shadow-lg h-screen flex flex-col transition-all duration-300 ${isSidebarOpen ? "w-64" : "w-20"}`}>
         <div className="flex items-center justify-between p-4 border-b">
