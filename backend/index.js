@@ -16,6 +16,9 @@ import { Server as SocketIOServer } from "socket.io";
 dotenv.config();
 
 const app = express();
+if (process.env.NODE_ENV === "production") {
+  app.set("trust proxy", 1);
+}
 const server = createServer(app);
 const PORT = process.env.PORT || 5000;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

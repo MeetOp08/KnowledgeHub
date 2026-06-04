@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 
 // Use Vite proxy in dev; override with VITE_API_URL in prod if needed
-const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? "http://localhost:5000" : "");
 
 interface SignUpProps {
   onSignUp: (role: "student" | "teacher", userInfo: any) => void;

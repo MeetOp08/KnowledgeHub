@@ -20,7 +20,7 @@ interface ChatSession {
   lastMessage: string;
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || (import.meta.env.DEV ? "http://localhost:5000" : "");
 
 const AIChat: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
