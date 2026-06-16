@@ -261,7 +261,7 @@ EMAIL_PASS=your_app_password
 ![AI Chat Interface](docs/screenshots/ai_chat.png)
 
 ### Teacher Dashboard
-![Teacher Dashboard](./docs/screenshots/Teacher_Dashboard.png)
+![Teacher Dashboard](./docs/screenshots/teacher_dashboard.png)
 
 ### Study Materials Hub
 ![Study Materials](./docs/screenshots/studyMaterials.png)
