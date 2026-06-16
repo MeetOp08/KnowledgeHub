@@ -252,7 +252,7 @@ EMAIL_PASS=your_app_password
 ![KnowledgeHub Landing Page](docs/screenshots/hero.png)
 
 ### Student Dashboard
-![Student Dashboard](./docs/screenshots/student_Dashboard.png)
+![Student Dashboard](./docs/screenshots/student_dashboard.png)
 
 ### Live Tutoring & Booking
 ![Live Tutoring](./docs/screenshots/live-tutoring.png)
