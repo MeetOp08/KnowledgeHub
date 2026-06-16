@@ -252,19 +252,19 @@ EMAIL_PASS=your_app_password
 ![KnowledgeHub Landing Page](docs/screenshots/hero.png)
 
 ### Student Dashboard
-![Student Dashboard](docs/screenshots/student_dashboard.png)
+![Student Dashboard](./docs/screenshots/student_Dashboard.png)
 
 ### Live Tutoring & Booking
-![Live Tutoring](docs/screenshots/live_tutoring.png)
+![Live Tutoring](./docs/screenshots/live-tutoring.png)
 
 ### AI Chat Assistant
 ![AI Chat Interface](docs/screenshots/ai_chat.png)
 
 ### Teacher Dashboard
-![Teacher Dashboard](docs/screenshots/teacher_dashboard.png)
+![Teacher Dashboard](./docs/screenshots/Teacher_Dashboard.png)
 
 ### Study Materials Hub
-![Study Materials](docs/screenshots/study_materials.png)
+![Study Materials](./docs/screenshots/studyMaterials.png)
 
 ---
 
